@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timera_pwm.hex
+r
+g
+q

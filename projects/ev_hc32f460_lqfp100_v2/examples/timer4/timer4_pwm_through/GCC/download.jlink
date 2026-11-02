@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer4_pwm_through.hex
+r
+g
+q

@@ -1,0 +1,36 @@
+./output/debug/hc32_ll.o: \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\src\hc32_ll.c \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_def.h \
+  D:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stddef.h \
+  D:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdint.h \
+  ..\..\..\..\..\..\drivers\cmsis\Device\HDSC\hc32f4xx\Include\hc32f4xx.h \
+  ..\..\..\..\..\..\drivers\cmsis\Device\HDSC\hc32f4xx\Include\hc32f460.h \
+  ..\..\..\..\..\..\drivers\cmsis\Include\core_cm4.h \
+  ..\..\..\..\..\..\drivers\cmsis\Include\cmsis_version.h \
+  ..\..\..\..\..\..\drivers\cmsis\Include\cmsis_compiler.h \
+  ..\..\..\..\..\..\drivers\cmsis\Include\cmsis_armclang.h \
+  D:\Keil_v5\ARM\ARMCLANG\Bin\..\include\arm_compat.h \
+  D:\Keil_v5\ARM\ARMCLANG\Bin\..\include\arm_acle.h \
+  ..\..\..\..\..\..\drivers\cmsis\Include\mpu_armv7.h \
+  ..\..\..\..\..\..\drivers\cmsis\Device\HDSC\hc32f4xx\Include\system_hc32f460.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_def.h \
+  ..\..\..\..\..\..\drivers\cmsis\Device\HDSC\hc32f4xx\Include\hc32f4xx.h \
+  ..\source\hc32f4xx_conf.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_aos.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_clk.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_dma.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_efm.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_fcg.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_fcm.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_gpio.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_icg.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_interrupts.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_keyscan.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_pwc.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_spi.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_sram.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_usart.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_utility.h \
+  D:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdio.h \
+  ..\..\..\..\..\..\drivers\hc32_ll_driver\inc\hc32_ll_utility.h

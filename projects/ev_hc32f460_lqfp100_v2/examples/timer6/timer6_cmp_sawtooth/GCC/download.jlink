@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer6_cmp_sawtooth.hex
+r
+g
+q

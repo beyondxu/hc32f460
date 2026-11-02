@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\sdioc_sdio.hex
+r
+g
+q

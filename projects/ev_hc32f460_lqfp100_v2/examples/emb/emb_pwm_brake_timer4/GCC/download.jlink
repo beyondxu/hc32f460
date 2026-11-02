@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\emb_pwm_brake_timer4.hex
+r
+g
+q

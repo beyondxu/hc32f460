@@ -1,0 +1,186 @@
+/**
+ *******************************************************************************
+ * @file  spi/spi_polling/source/main.c
+ * @brief Main program SPI tx/rx polling for the Device Driver Library.
+ @verbatim
+   Change Logs:
+   Date             Author          Notes
+   2022-03-31       CDT             First version
+   2023-09-30       CDT             Modify the IO properties of SPI
+                                    Replace the tx&rx function of SPI
+ @endverbatim
+ *******************************************************************************
+ * Copyright (C) 2022-2025, Xiaohua Semiconductor Co., Ltd. All rights reserved.
+ *
+ * This software component is licensed by XHSC under BSD 3-Clause license
+ * (the "License"); You may not use this file except in compliance with the
+ * License. You may obtain a copy of the License at:
+ *                    opensource.org/licenses/BSD-3-Clause
+ *
+ *******************************************************************************
+ */
+
+/*******************************************************************************
+ * Include files
+ ******************************************************************************/
+#include "main.h"
+
+/**
+ * @addtogroup HC32F460_DDL_Examples
+ * @{
+ */
+
+/**
+ * @addtogroup SPI_Polling
+ * @{
+ */
+
+/*******************************************************************************
+ * Local type definitions ('typedef')
+ ******************************************************************************/
+
+/*******************************************************************************
+ * Local pre-processor symbols/macros ('#define')
+ ******************************************************************************/
+/* unlock/lock peripheral */
+#define EXAMPLE_PERIPH_WE               (LL_PERIPH_GPIO | LL_PERIPH_EFM | LL_PERIPH_FCG | \
+                                         LL_PERIPH_PWC_CLK_RMU | LL_PERIPH_SRAM)
+#define EXAMPLE_PERIPH_WP               (LL_PERIPH_EFM | LL_PERIPH_FCG | LL_PERIPH_SRAM)
+
+/* Configuration for Example */
+#define EXAMPLE_SPI_MASTER_SLAVE        (SPI_MASTER)
+#define EXAMPLE_SPI_BUF_LEN             (128UL)
+
+/* SPI definition */
+#define SPI_UNIT                        (CM_SPI1)
+#define SPI_CLK                         (FCG1_PERIPH_SPI1)
+
+/* SS = PA7 */
+#define SPI_SS_PORT                     (GPIO_PORT_A)
+#define SPI_SS_PIN                      (GPIO_PIN_07)
+#define SPI_SS_FUNC                     (GPIO_FUNC_42)
+/* SCK = PA8 */
+#define SPI_SCK_PORT                    (GPIO_PORT_A)
+#define SPI_SCK_PIN                     (GPIO_PIN_08)
+#define SPI_SCK_FUNC                    (GPIO_FUNC_43)
+/* MOSI = PB0 */
+#define SPI_MOSI_PORT                   (GPIO_PORT_B)
+#define SPI_MOSI_PIN                    (GPIO_PIN_00)
+#define SPI_MOSI_FUNC                   (GPIO_FUNC_40)
+/* MISO = PC5 */
+#define SPI_MISO_PORT                   (GPIO_PORT_C)
+#define SPI_MISO_PIN                    (GPIO_PIN_05)
+#define SPI_MISO_FUNC                   (GPIO_FUNC_41)
+
+/* SPI communication timeout */
+#define SPI_COMM_TIMEOUT_VAL            (0x20000000UL)
+
+/*******************************************************************************
+ * Global variable definitions (declared in header file with 'extern')
+ ******************************************************************************/
+
+/*******************************************************************************
+ * Local function prototypes ('static')
+ ******************************************************************************/
+
+/*******************************************************************************
+ * Local variable definitions ('static')
+ ******************************************************************************/
+static char u8TxBuf[EXAMPLE_SPI_BUF_LEN] = "SPI Master/Slave example: Communication between two boards!";
+static char u8RxBuf[EXAMPLE_SPI_BUF_LEN];
+
+/*******************************************************************************
+ * Function implementation - global ('extern') and local ('static')
+ ******************************************************************************/
+/**
+ * @brief  SPI configure.
+ * @param  None
+ * @retval None
+ */
+static void SPI_Config(void)
+{
+    stc_spi_init_t stcSpiInit;
+    stc_gpio_init_t stcGpioInit;
+
+    (void)GPIO_StructInit(&stcGpioInit);
+    stcGpioInit.u16PinDrv       = PIN_HIGH_DRV;
+    (void)GPIO_Init(SPI_SS_PORT,   SPI_SS_PIN,   &stcGpioInit);
+    (void)GPIO_Init(SPI_SCK_PORT,  SPI_SCK_PIN,  &stcGpioInit);
+    (void)GPIO_Init(SPI_MOSI_PORT, SPI_MOSI_PIN, &stcGpioInit);
+    (void)GPIO_Init(SPI_MISO_PORT, SPI_MISO_PIN, &stcGpioInit);
+
+    /* Configure Port */
+    GPIO_SetFunc(SPI_SS_PORT,   SPI_SS_PIN,   SPI_SS_FUNC);
+    GPIO_SetFunc(SPI_SCK_PORT,  SPI_SCK_PIN,  SPI_SCK_FUNC);
+    GPIO_SetFunc(SPI_MOSI_PORT, SPI_MOSI_PIN, SPI_MOSI_FUNC);
+    GPIO_SetFunc(SPI_MISO_PORT, SPI_MISO_PIN, SPI_MISO_FUNC);
+
+    /* Configuration SPI */
+    FCG_Fcg1PeriphClockCmd(SPI_CLK, ENABLE);
+    SPI_StructInit(&stcSpiInit);
+    stcSpiInit.u32WireMode          = SPI_4_WIRE;
+    stcSpiInit.u32TransMode         = SPI_FULL_DUPLEX;
+    stcSpiInit.u32MasterSlave       = EXAMPLE_SPI_MASTER_SLAVE;
+    stcSpiInit.u32Parity            = SPI_PARITY_INVD;
+    stcSpiInit.u32SpiMode           = SPI_MD_1;
+    stcSpiInit.u32BaudRatePrescaler = SPI_BR_CLK_DIV64;
+    stcSpiInit.u32DataBits          = SPI_DATA_SIZE_8BIT;
+    stcSpiInit.u32FirstBit          = SPI_FIRST_MSB;
+    stcSpiInit.u32FrameLevel        = SPI_1_FRAME;
+    (void)SPI_Init(SPI_UNIT, &stcSpiInit);
+    SPI_Cmd(SPI_UNIT, ENABLE);
+}
+
+/**
+ * @brief  Main function of SPI tx/rx polling project
+ * @param  None
+ * @retval int32_t return value, if needed
+ */
+int32_t main(void)
+{
+    /* Peripheral registers write unprotected */
+    LL_PERIPH_WE(EXAMPLE_PERIPH_WE);
+    /* Configure BSP */
+    BSP_CLK_Init();
+    BSP_LED_Init();
+    BSP_KEY_Init();
+    /* Configure SPI */
+    SPI_Config();
+    /* Peripheral registers write protected */
+    LL_PERIPH_WP(EXAMPLE_PERIPH_WP);
+
+    for (;;) {
+        /* Wait key trigger in master mode */
+#if (EXAMPLE_SPI_MASTER_SLAVE == SPI_MASTER)
+        while (RESET == BSP_KEY_GetStatus(BSP_KEY_2)) {
+        }
+#endif
+        /* Send and receive data */
+        memset(u8RxBuf, 0, EXAMPLE_SPI_BUF_LEN);
+        (void)SPI_TransReceive(SPI_UNIT, u8TxBuf, u8RxBuf, EXAMPLE_SPI_BUF_LEN, SPI_COMM_TIMEOUT_VAL);
+        /* Compare u8TxBuf and u8RxBuf */
+        if (0 == memcmp(u8TxBuf, u8RxBuf, EXAMPLE_SPI_BUF_LEN)) {
+            BSP_LED_On(LED_BLUE);
+            BSP_LED_Off(LED_RED);
+        } else {
+            BSP_LED_On(LED_RED);
+            BSP_LED_Off(LED_BLUE);
+        }
+#if (EXAMPLE_SPI_MASTER_SLAVE == SPI_MASTER)
+        /* Wait for the slave to be ready */
+        DDL_DelayMS(10U);
+#endif
+    }
+}
+
+/**
+ * @}
+ */
+
+/**
+ * @}
+ */
+
+/*******************************************************************************
+ * EOF (not truncated)
+ ******************************************************************************/

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\iap_ymodem_boot.hex
+r
+g
+q

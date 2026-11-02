@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\clk_switch_sysclk.hex
+r
+g
+q

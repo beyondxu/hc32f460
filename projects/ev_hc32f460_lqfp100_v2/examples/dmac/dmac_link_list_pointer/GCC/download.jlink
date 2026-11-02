@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\dmac_link_list_pointer.hex
+r
+g
+q

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\fcm_freq_measure.hex
+r
+g
+q

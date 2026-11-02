@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\dmac_channel_reconfig.hex
+r
+g
+q

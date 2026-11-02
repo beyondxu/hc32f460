@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timera_capture.hex
+r
+g
+q

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\intc_nmi_xtalstop.hex
+r
+g
+q

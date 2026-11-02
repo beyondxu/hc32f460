@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\intc_extint_key.hex
+r
+g
+q

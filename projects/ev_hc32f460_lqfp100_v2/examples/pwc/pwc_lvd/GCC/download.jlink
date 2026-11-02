@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\pwc_lvd.hex
+r
+g
+q

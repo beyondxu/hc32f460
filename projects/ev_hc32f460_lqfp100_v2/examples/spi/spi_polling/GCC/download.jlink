@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\spi_polling.hex
+r
+g
+q

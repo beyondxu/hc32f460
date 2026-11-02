@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\iap_app.hex
+r
+g
+q

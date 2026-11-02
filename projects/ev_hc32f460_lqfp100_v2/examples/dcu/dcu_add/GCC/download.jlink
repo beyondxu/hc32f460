@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\dcu_add.hex
+r
+g
+q

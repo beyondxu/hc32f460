@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timera_phase_difference_count.hex
+r
+g
+q

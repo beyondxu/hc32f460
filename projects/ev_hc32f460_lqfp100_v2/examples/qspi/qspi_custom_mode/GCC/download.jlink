@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\qspi_custom_mode.hex
+r
+g
+q

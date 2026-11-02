@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\pwc_lpc.hex
+r
+g
+q

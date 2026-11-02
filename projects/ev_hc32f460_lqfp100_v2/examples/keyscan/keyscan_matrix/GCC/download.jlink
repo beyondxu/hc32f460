@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\keyscan_matrix.hex
+r
+g
+q

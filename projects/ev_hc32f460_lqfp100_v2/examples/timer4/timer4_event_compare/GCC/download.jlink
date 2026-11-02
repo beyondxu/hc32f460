@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer4_event_compare.hex
+r
+g
+q

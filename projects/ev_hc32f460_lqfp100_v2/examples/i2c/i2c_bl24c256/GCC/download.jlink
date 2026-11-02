@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\i2c_bl24c256.hex
+r
+g
+q

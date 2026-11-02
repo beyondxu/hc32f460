@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timera_base_timer.hex
+r
+g
+q

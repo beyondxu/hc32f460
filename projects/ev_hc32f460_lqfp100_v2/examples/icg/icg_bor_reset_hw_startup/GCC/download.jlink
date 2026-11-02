@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\icg_bor_reset_hw_startup.hex
+r
+g
+q

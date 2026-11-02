@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\dmac_repeat.hex
+r
+g
+q

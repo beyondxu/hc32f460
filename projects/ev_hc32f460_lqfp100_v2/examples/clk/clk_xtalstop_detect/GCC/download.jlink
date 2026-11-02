@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\clk_xtalstop_detect.hex
+r
+g
+q

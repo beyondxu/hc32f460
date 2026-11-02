@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\mpu_core_write_protect.hex
+r
+g
+q

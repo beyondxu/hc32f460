@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\ots_scaling_experiment.hex
+r
+g
+q

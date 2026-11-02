@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\flash_emulate_eeprom.hex
+r
+g
+q

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\ep_inout.hex
+r
+g
+q

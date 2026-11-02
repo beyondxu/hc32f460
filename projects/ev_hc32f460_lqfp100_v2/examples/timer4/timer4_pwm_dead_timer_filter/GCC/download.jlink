@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer4_pwm_dead_timer_filter.hex
+r
+g
+q

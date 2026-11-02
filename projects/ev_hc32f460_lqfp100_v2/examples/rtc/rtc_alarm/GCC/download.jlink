@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\rtc_alarm.hex
+r
+g
+q

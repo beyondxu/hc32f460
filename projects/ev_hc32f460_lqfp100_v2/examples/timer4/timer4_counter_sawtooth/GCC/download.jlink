@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer4_counter_sawtooth.hex
+r
+g
+q

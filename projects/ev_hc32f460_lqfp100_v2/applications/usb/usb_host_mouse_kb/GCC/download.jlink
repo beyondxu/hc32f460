@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\usb_host_mouse_kb.hex
+r
+g
+q

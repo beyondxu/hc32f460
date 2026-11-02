@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\i2s_record_and_play.hex
+r
+g
+q

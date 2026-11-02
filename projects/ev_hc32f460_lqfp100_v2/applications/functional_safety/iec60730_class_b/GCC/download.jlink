@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\iec60730_class_b_crc32.hex
+r
+g
+q

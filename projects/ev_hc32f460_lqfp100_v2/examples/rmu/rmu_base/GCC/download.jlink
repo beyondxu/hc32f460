@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\rmu_base.hex
+r
+g
+q

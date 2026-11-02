@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer6_sw_sync.hex
+r
+g
+q

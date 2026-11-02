@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer4_oc_low_ch.hex
+r
+g
+q

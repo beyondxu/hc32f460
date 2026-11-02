@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\cmp_scan_mode.hex
+r
+g
+q

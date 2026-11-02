@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\i2s_play_audio.hex
+r
+g
+q

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\pwc_sleep_wake.hex
+r
+g
+q

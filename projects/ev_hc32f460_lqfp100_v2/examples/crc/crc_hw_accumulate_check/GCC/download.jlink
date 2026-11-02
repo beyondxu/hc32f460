@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\crc_hw_accumulate_check.hex
+r
+g
+q

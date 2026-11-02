@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\can_classical.hex
+r
+g
+q

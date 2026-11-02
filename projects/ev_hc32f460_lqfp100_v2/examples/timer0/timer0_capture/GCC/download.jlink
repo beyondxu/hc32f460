@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timer0_capture.hex
+r
+g
+q

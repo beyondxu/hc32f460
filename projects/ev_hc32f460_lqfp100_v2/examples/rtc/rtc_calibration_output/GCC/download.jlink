@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\rtc_calibration_output.hex
+r
+g
+q

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\rtc_calendar.hex
+r
+g
+q

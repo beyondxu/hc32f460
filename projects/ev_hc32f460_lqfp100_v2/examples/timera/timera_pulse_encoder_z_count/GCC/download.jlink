@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\timera_pulse_encoder_z_count.hex
+r
+g
+q

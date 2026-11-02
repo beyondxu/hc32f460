@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\intc_swint.hex
+r
+g
+q

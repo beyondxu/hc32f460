@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\spi_write_read_flash.hex
+r
+g
+q

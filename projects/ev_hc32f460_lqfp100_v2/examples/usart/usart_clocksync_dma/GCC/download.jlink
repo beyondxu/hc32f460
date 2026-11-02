@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\usart_clocksync_dma.hex
+r
+g
+q

@@ -1,0 +1,6 @@
+r
+h
+loadfile ..\Debug\can_loopback.hex
+r
+g
+q
