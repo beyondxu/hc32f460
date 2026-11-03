@@ -307,6 +307,11 @@ void HC32_PowerOn_SelfTest_100B(void) {
 
     // 5. 传输完成：关闭 SPI，释放 PH2 恢复高电平
     SPI_Cmd(SPI_UNIT, DISABLE);
+    /* Echo the actual received bytes, not an unrelated canned pattern. */
+    for (uint32_t i = 0; i < TPH_COLUMN_BYTES; ++i) {
+        u8SelfTestTxBuf[i] = (uint8_t)~u8SelfTestRxBuf[i];
+    }
+
     GPIO_SetPins(READY_PORT, READY_PIN);
 
     // 6. 等待 BK7258 释放 PC13 恢复为高电平
@@ -350,52 +355,35 @@ void HC32_PowerOn_SelfTest_100B(void) {
 
 
 
+/* Per-column handshake: READY high = RX armed; READY low = DMA accepted,
+ * firing or rearming. SYNC must remain low until READY acknowledges it.
+ */
 void HC32_Realtime_Print_Engine(void) {
-    printf("\r\n[HC32 PrintEngine] Stage 2: Ready for Real-Time Color Print!\r\n");
-
     TPH_M0333N_Power(ENABLE);
-
-    // ★ 核心修复：直接使用你原版经过自检验证 100% 能收数据的装载函数！★
-    // 首次装载：TX 发送哑数据，RX 接收到 Buffer 0
-    u8CurrentBufIdx = 0;
-    Slave_Arm_SPI_DMA(u8SelfTestTxBuf, &u8PrintBuffer[0][0], TPH_COLUMN_BYTES);
-
+    u8CurrentBufIdx = 0U;
+    Slave_Arm_SPI_DMA(u8SelfTestTxBuf, u8PrintBuffer[0], TPH_COLUMN_BYTES);
     GPIO_SetPins(READY_PORT, READY_PIN);
-    printf("[HC32 PrintEngine] Listening for Fire Pulses on PC13...\r\n");
-
-    uint32_t fire_col_cnt = 0;
 
     for (;;) {
-        // ★ 核心检测：一旦捕获到 BK7258 拉低打火脉冲 (PC13 LOW) ★
-        if (PIN_RESET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) {
+        if (PIN_RESET != GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) continue;
 
-            // 1. 获取当前刚刚接收完的一列数据
-            const uint8_t *pCurrentData = &u8PrintBuffer[u8CurrentBufIdx][0];
-
-            // 诊断 LOG：每 200 列打印一次
-            if (fire_col_cnt % 200 == 0 || fire_col_cnt < 3) {
-                printf("[HC32 DIAG] Col %lu (BufIdx=%d): Data[0]=0x%02X, [1]=0x%02X, [2]=0x%02X\r\n", 
-                       (unsigned long)fire_col_cnt, u8CurrentBufIdx, 
-                       pCurrentData[0], pCurrentData[1], pCurrentData[2]);
-            }
-
-            // 2. 翻转双缓冲游标
-            uint8_t u8NextIdx = u8CurrentBufIdx ^ 1U;
-
-            // 3. 立即为下一次 SPI 接收装载下一块缓冲区 (使用完整的硬件装载函数！)
-            Slave_Arm_SPI_DMA(u8SelfTestTxBuf, &u8PrintBuffer[u8NextIdx][0], TPH_COLUMN_BYTES);
-
-            // 4. 执行本列物理打火
-            TPH_FireOneColumn(pCurrentData);
-            fire_col_cnt++;
-
-            // 5. 更新当前缓冲区索引
-            u8CurrentBufIdx = u8NextIdx;
-
-            // 6. 等待 BK7258 释放打火脉冲恢复高电平
-            while (PIN_RESET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) {
-            }
+        /* Never use a partially received column. If the master cancels its
+         * request after a timeout, discard the partial DMA and rearm it.
+         */
+        while (RESET == enDmaRxDone) {
+            if (PIN_SET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) break;
         }
+        GPIO_ResetPins(READY_PORT, READY_PIN);
+        if (SET == enDmaRxDone) {
+            /* DMA owns no further writes to this buffer after completion. */
+            __DMB();
+            TPH_FireOneColumn(u8PrintBuffer[u8CurrentBufIdx]);
+            u8CurrentBufIdx ^= 1U;
+        }
+        while (PIN_RESET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) {}
+        Slave_Arm_SPI_DMA(u8SelfTestTxBuf,
+                         u8PrintBuffer[u8CurrentBufIdx], TPH_COLUMN_BYTES);
+        GPIO_SetPins(READY_PORT, READY_PIN);
     }
 }
 void HC32_Standalone_Hardware_Test(void);
@@ -426,7 +414,7 @@ int32_t main(void) {
     // 6. 自检通过，使能 15V (先 VL 后 VP)
     TPH_M0333N_Power(ENABLE);
 
-    HC32_Standalone_Hardware_Test();
+    /* Standalone firing must be requested explicitly, not run on startup. */
     // 7. 进入实时喷墨流水线引擎 (等待 BK7258 发送数据并拉低 PC13 打火)
     HC32_Realtime_Print_Engine();
 
