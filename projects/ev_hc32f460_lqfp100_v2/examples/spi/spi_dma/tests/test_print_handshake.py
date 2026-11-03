@@ -12,6 +12,8 @@ harness = r'''
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
+#include "printer_control.h"
+#define DISABLE 0
 #define ENABLE 1
 #define RESET 0
 #define SET 1
@@ -29,8 +31,9 @@ static int enDmaRxDone, ready, arms, fires, event_idx, stop_after, event_count;
 static uint8_t *dma_buffer;
 static jmp_buf stop;
 struct event {int sync, done;};
-static struct event events[12];
-static void TPH_M0333N_Power(int state) {}
+static struct event events[32];
+static int mode, power;
+static void TPH_M0333N_Power(int state) {power=state;}
 static void Slave_Arm_SPI_DMA(uint8_t *tx, uint8_t *rx, uint16_t len) {
     assert(len==100); enDmaRxDone=RESET; dma_buffer=rx; ++arms;
 }
@@ -42,42 +45,52 @@ static void GPIO_ResetPins(int port, int pin) {ready=0;}
 static int GPIO_ReadInputPins(int port, int pin) {
     assert(event_idx < event_count);
     struct event e=events[event_idx++];
-    if(e.done) {memset(dma_buffer,arms,100); enDmaRxDone=SET;}
+    if(e.done) {
+        memset(dma_buffer,arms,100);
+        if (mode != 2 && (arms==1 || arms==4)) {
+            memset(dma_buffer,0,100); dma_buffer[0]=PRINTER_CONTROL_TAG;
+            dma_buffer[1]=arms==1?PRINTER_CONTROL_ON:PRINTER_CONTROL_OFF;
+            memcpy(dma_buffer+2,PRINTER_CONTROL_MAGIC,PRINTER_CONTROL_MAGIC_LEN);
+            if(mode==3) dma_buffer[99]=1; /* malformed control must not power on */
+        }
+        if(mode==4 && arms==2) dma_buffer[50]=0xC0; /* reserved data bits */
+        enDmaRxDone=SET;
+    }
     return e.sync;
 }
 static void TPH_FireOneColumn(const uint8_t *p) {
-    assert(ready==0 && enDmaRxDone==SET);
+    assert(ready==0 && enDmaRxDone==SET && power==ENABLE);
     assert(p==u8PrintBuffer[u8CurrentBufIdx]);
     for(int i=0;i<100;i++) assert(p[i]==arms);
     ++fires;
 }
 ENGINE
-static void run(int cancel) {
-    arms=fires=event_idx=0;
-    events[0]=(struct event){0,0};
-    if(cancel) {
-        events[1]=(struct event){1,0}; /* request ends before DMA completion */
+static void run(int scenario) {
+    mode=scenario; arms=fires=event_idx=0;
+    if(mode==1) {
+        events[0]=(struct event){0,0};
+        events[1]=(struct event){1,0};
         events[2]=(struct event){1,0};
         event_count=3; stop_after=2;
     } else {
-        events[1]=(struct event){0,0}; /* still receiving: must not fire */
-        events[2]=(struct event){0,1}; /* full column arrives */
-        events[3]=(struct event){1,0};
-        events[4]=(struct event){0,1}; /* second complete column */
-        events[5]=(struct event){1,0};
-        event_count=6; stop_after=3;
+        for(int frame=0;frame<5;frame++) {
+            events[2*frame]=(struct event){0,1};
+            events[2*frame+1]=(struct event){1,0};
+        }
+        event_count=10; stop_after=6;
     }
     if(!setjmp(stop)) HC32_Realtime_Print_Engine();
-    assert(fires==(cancel?0:2));
+    assert(fires==(mode==0?2:mode==4?1:0));
     assert(arms==stop_after && ready==1);
+    assert(power==DISABLE);
 }
 int main(void) {
-    run(0); run(1);
-    puts("PASS: incomplete DMA cannot fire, completed columns alternate buffers, cancelled RX rearms without firing");
+    for(int i=0;i<5;i++) run(i);
+    puts("PASS: power controls, DMA completion, alternating buffers, cancel, unpowered/invalid data rejection");
 }
 '''.replace('ENGINE', engine)
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     (root/'test.c').write_text(harness)
-    subprocess.run(['cc', '-std=c99', str(root/'test.c'), '-o', str(root/'test')], check=True)
+    subprocess.run(['cc', '-std=c99', '-I', str(Path(__file__).resolve().parents[1]/'source'), str(root/'test.c'), '-o', str(root/'test')], check=True)
     subprocess.run([str(root/'test')], check=True)

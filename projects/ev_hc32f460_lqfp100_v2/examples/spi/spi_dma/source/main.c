@@ -1,3 +1,4 @@
+#include "printer_control.h"
 #include "main.h"
 #include "tph_driver.h"
 #include <stdio.h>
@@ -359,7 +360,9 @@ void HC32_PowerOn_SelfTest_100B(void) {
  * firing or rearming. SYNC must remain low until READY acknowledges it.
  */
 void HC32_Realtime_Print_Engine(void) {
-    TPH_M0333N_Power(ENABLE);
+    TPH_M0333N_Power(DISABLE);
+    uint8_t head_powered = 0U;
+    printf("[HC32 CONTROL] PCTLv1 ready power=OFF\r\n");
     u8CurrentBufIdx = 0U;
     Slave_Arm_SPI_DMA(u8SelfTestTxBuf, u8PrintBuffer[0], TPH_COLUMN_BYTES);
     GPIO_SetPins(READY_PORT, READY_PIN);
@@ -377,29 +380,39 @@ void HC32_Realtime_Print_Engine(void) {
         if (SET == enDmaRxDone) {
             /* DMA owns no further writes to this buffer after completion. */
             __DMB();
-            /* Snapshot once; log only after the timing-critical firing call. */
-            static uint8_t reported_nonzero = 0U;
-            unsigned first_slot = TPH_COLUMN_BYTES;
-            unsigned active_bits = 0U;
-            uint8_t first_data = 0U;
-            if (!reported_nonzero) {
-                for (unsigned i = 0U; i < TPH_COLUMN_BYTES; ++i) {
-                    uint8_t data = u8PrintBuffer[u8CurrentBufIdx][i];
-                    if (data && first_slot == TPH_COLUMN_BYTES) {
-                        first_slot = i;
-                        first_data = data;
-                    }
-                    for (unsigned bit = 0U; bit < 6U; ++bit) {
-                        active_bits += (data >> bit) & 1U;
+            const uint8_t *column = u8PrintBuffer[u8CurrentBufIdx];
+            if (column[0] == PRINTER_CONTROL_TAG) {
+                unsigned valid = column[1] == PRINTER_CONTROL_ON || column[1] == PRINTER_CONTROL_OFF;
+                for (unsigned i = 0; i < PRINTER_CONTROL_MAGIC_LEN; ++i)
+                    if (column[i + 2] != (uint8_t)PRINTER_CONTROL_MAGIC[i]) valid = 0;
+                for (unsigned i = 2 + PRINTER_CONTROL_MAGIC_LEN; i < TPH_COLUMN_BYTES; ++i)
+                    if (column[i]) valid = 0;
+                if (valid) {
+                    head_powered = column[1] == PRINTER_CONTROL_ON;
+                    TPH_M0333N_Power(head_powered ? ENABLE : DISABLE);
+                    printf("[HC32 CONTROL] PCTLv1 power=%s\r\n", head_powered ? "ON" : "OFF");
+                } else {
+                    head_powered = 0;
+                    TPH_M0333N_Power(DISABLE);
+                    printf("[HC32 CONTROL] invalid command power=OFF\r\n");
+                }
+            } else {
+                unsigned valid = 1, first_slot = TPH_COLUMN_BYTES, active_bits = 0;
+                static uint8_t reported_nonzero = 0;
+                for (unsigned i = 0; i < TPH_COLUMN_BYTES; ++i) {
+                    if (column[i] & 0xC0U) valid = 0;
+                    if (column[i] && first_slot == TPH_COLUMN_BYTES) first_slot = i;
+                    for (unsigned bit = 0; bit < 6; ++bit) active_bits += (column[i] >> bit) & 1U;
+                }
+                if (valid && head_powered) {
+                    TPH_FireOneColumn(column);
+                    if (!reported_nonzero && first_slot < TPH_COLUMN_BYTES) {
+                        reported_nonzero = 1;
+                        printf("[HC32 COL] slot=%u data=0x%02X addr=%u section=%u active_bits=%u fire_call_returned=1\r\n",
+                               first_slot, (unsigned)column[first_slot], first_slot / 4U + 1U,
+                               first_slot % 4U + 1U, active_bits);
                     }
                 }
-            }
-            TPH_FireOneColumn(u8PrintBuffer[u8CurrentBufIdx]);
-            if (!reported_nonzero && first_slot < TPH_COLUMN_BYTES) {
-                reported_nonzero = 1U;
-                printf("[HC32 COL] slot=%u data=0x%02X addr=%u section=%u active_bits=%u fire_call_returned=1\r\n",
-                       first_slot, (unsigned)first_data, first_slot / 4U + 1U,
-                       first_slot % 4U + 1U, active_bits);
             }
             u8CurrentBufIdx ^= 1U;
         }
@@ -435,7 +448,7 @@ int32_t main(void) {
     HC32_PowerOn_SelfTest_100B();
 
     // 6. 自检通过，使能 15V (先 VL 后 VP)
-    TPH_M0333N_Power(ENABLE);
+    TPH_M0333N_Power(DISABLE);
 
     /* Standalone firing must be requested explicitly, not run on startup. */
     // 7. 进入实时喷墨流水线引擎 (等待 BK7258 发送数据并拉低 PC13 打火)
