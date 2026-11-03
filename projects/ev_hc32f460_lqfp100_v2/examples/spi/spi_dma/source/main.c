@@ -377,7 +377,30 @@ void HC32_Realtime_Print_Engine(void) {
         if (SET == enDmaRxDone) {
             /* DMA owns no further writes to this buffer after completion. */
             __DMB();
+            /* Snapshot once; log only after the timing-critical firing call. */
+            static uint8_t reported_nonzero = 0U;
+            unsigned first_slot = TPH_COLUMN_BYTES;
+            unsigned active_bits = 0U;
+            uint8_t first_data = 0U;
+            if (!reported_nonzero) {
+                for (unsigned i = 0U; i < TPH_COLUMN_BYTES; ++i) {
+                    uint8_t data = u8PrintBuffer[u8CurrentBufIdx][i];
+                    if (data && first_slot == TPH_COLUMN_BYTES) {
+                        first_slot = i;
+                        first_data = data;
+                    }
+                    for (unsigned bit = 0U; bit < 6U; ++bit) {
+                        active_bits += (data >> bit) & 1U;
+                    }
+                }
+            }
             TPH_FireOneColumn(u8PrintBuffer[u8CurrentBufIdx]);
+            if (!reported_nonzero && first_slot < TPH_COLUMN_BYTES) {
+                reported_nonzero = 1U;
+                printf("[HC32 COL] slot=%u data=0x%02X addr=%u section=%u active_bits=%u fire_call_returned=1\r\n",
+                       first_slot, (unsigned)first_data, first_slot / 4U + 1U,
+                       first_slot % 4U + 1U, active_bits);
+            }
             u8CurrentBufIdx ^= 1U;
         }
         while (PIN_RESET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) {}
