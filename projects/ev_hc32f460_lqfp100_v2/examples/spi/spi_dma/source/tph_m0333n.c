@@ -253,15 +253,15 @@ void TPH_M0333N_Init(void) {
 
 void TPH_M0333N_Power(en_functional_state_t enState) {
     if (ENABLE == enState) {
-        printf("[TPH Power] Step 0: Enabling VL Logic Power (PB7)...\r\n");
+        printf("[TPH Power] Step 0: Enabling VL Logic Power (PB6)...\r\n");
         GPIO_SetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
         delay_10us(); // 严格延时 10us (tpo >= 5us)
 
-        printf("[TPH Power] Step 1: Enabling VP Heater Power (PB6)...\r\n");
+        printf("[TPH Power] Step 1: Enabling VP Heater Power (PB5)...\r\n");
         GPIO_SetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
         delay_10us(); // 严格延时 10us
         
-        printf("[TPH Power] Step 2: VL (PB7) & VP (PB6) Powered ON (15V Ready)!\r\n");
+        printf("[TPH Power] Step 2: VL_ENABLE(PB6) and TPH_ENABLE(PB5) asserted; rail voltages NOT measured.\r\n");
     } else {
         GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
         delay_10us();
