@@ -1,3 +1,4 @@
+#include "printer_row_audit.h"
 #include "printer_control.h"
 #include "main.h"
 #include "tph_driver.h"
@@ -362,7 +363,8 @@ void HC32_PowerOn_SelfTest_100B(void) {
 void HC32_Realtime_Print_Engine(void) {
     TPH_M0333N_Power(DISABLE);
     uint8_t head_powered = 0U;
-    printf("[HC32 CONTROL] PCTLv1 ready power=OFF\r\n");
+    printer_row_audit_t row_audit = {0};
+    printf("[HC32 CONTROL] PCTLv1 ROW_AUDIT_v1 ready power=OFF\r\n");
     u8CurrentBufIdx = 0U;
     Slave_Arm_SPI_DMA(u8SelfTestTxBuf, u8PrintBuffer[0], TPH_COLUMN_BYTES);
     GPIO_SetPins(READY_PORT, READY_PIN);
@@ -390,10 +392,13 @@ void HC32_Realtime_Print_Engine(void) {
                 if (valid) {
                     head_powered = column[1] == PRINTER_CONTROL_ON;
                     TPH_M0333N_Power(head_powered ? ENABLE : DISABLE);
+                    if (head_powered) printer_row_audit_begin(&row_audit);
+                    else printer_row_audit_end(&row_audit);
                     printf("[HC32 CONTROL] PCTLv1 power=%s\r\n", head_powered ? "ON" : "OFF");
                 } else {
                     head_powered = 0;
                     TPH_M0333N_Power(DISABLE);
+                    printer_row_audit_end(&row_audit);
                     printf("[HC32 CONTROL] invalid command power=OFF\r\n");
                 }
             } else {
@@ -413,8 +418,12 @@ void HC32_Realtime_Print_Engine(void) {
                                first_slot % 4U + 1U, active_bits);
                     }
                 }
+                if (head_powered)
+                    printer_row_audit_column(&row_audit, column, active_bits, valid);
             }
             u8CurrentBufIdx ^= 1U;
+        } else if (row_audit.active) {
+            ++row_audit.canceled;
         }
         while (PIN_RESET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) {}
         Slave_Arm_SPI_DMA(u8SelfTestTxBuf,

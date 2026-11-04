@@ -13,6 +13,7 @@ harness = r'''
 #include <stdio.h>
 #include <string.h>
 #include "printer_control.h"
+#include "printer_row_audit.h"
 #define DISABLE 0
 #define ENABLE 1
 #define RESET 0
