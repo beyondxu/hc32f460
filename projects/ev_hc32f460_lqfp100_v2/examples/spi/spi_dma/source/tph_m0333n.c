@@ -204,6 +204,36 @@ static __attribute__((always_inline)) inline void FAST_SET_DATA(uint8_t d_val) {
     CM_GPIO->POSRA = s_DataPortA_Set[idx];
 }
 
+/* Section-isolated diagnostic: preload with CE LOW, then gate one section.
+ * DWT counts core cycles, not NOP instructions. Target is 2us; GPIO/bus and
+ * loop exit overhead still require an oscilloscope measurement on the board.
+ */
+static uint32_t s_u32FireCycles;
+static bool s_bPulseClockReady;
+static void TPH_PulseClock_Init(void) {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    uint32_t before = DWT->CYCCNT;
+    delay_100ns();
+    s_bPulseClockReady = (DWT->CYCCNT != before) &&
+                         (SystemCoreClock == 200000000UL);
+    s_u32FireCycles = SystemCoreClock / 500000UL;
+    printf("[TPH TIMING] SECTION_PULSE_v1 core=%lu cycles=%lu clock_ready=%u target_ns=2000 scope_required\r\n",
+           (unsigned long)SystemCoreClock, (unsigned long)s_u32FireCycles,
+           (unsigned)s_bPulseClockReady);
+}
+static __attribute__((always_inline)) inline void TPH_Pulse_Section(void) {
+    uint32_t saved = __get_PRIMASK();
+    __disable_irq();
+    __DMB();
+    uint32_t start = DWT->CYCCNT;
+    CE_HIGH();
+    while ((uint32_t)(DWT->CYCCNT - start) < s_u32FireCycles) {}
+    CE_LOW();
+    __DSB();
+    __set_PRIMASK(saved);
+}
+
 /* CE gates heating, while S1..S4 retain sampled domain bits. Clearing the
  * external D pins alone does not clear those latches. All clearing below is
  * performed with CE LOW; it adds no intentional heating pulse.
@@ -267,10 +297,18 @@ void TPH_M0333N_Init(void) {
     GPIO_Init(PIN_D6_PORT, PIN_D6_PIN, &stcGpioInit);
 
     TPH_Build_Fast_LUT();
+    TPH_PulseClock_Init();
 }
 
 void TPH_M0333N_Power(en_functional_state_t enState) {
     if (ENABLE == enState) {
+        if (!s_bPulseClockReady) {
+            CE_LOW();
+            GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
+            GPIO_ResetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
+            printf("[TPH TIMING ERROR] clock unavailable; head remains OFF\r\n");
+            return;
+        }
         printf("[TPH Power] Step 0: Enabling VL Logic Power (PB6)...\r\n");
         GPIO_SetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
         delay_10us(); // 严格延时 10us (tpo >= 5us)
@@ -293,61 +331,35 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
 }
 
 void TPH_FireOneColumn(const uint8_t *pColumn100B) {
-    if (!s_bLutInitialized) {
-        TPH_Build_Fast_LUT();
-    }
+    if (!s_bLutInitialized) TPH_Build_Fast_LUT();
     TPH_Clear_Latches_CE_Low();
-    if (pColumn100B == NULL) { TPH_Clear_Address(); return; }
-
-    uint32_t data_idx = 0;
-
-    for (uint8_t add = 0; add < 25; add++) {
+    if (!pColumn100B || !s_bPulseClockReady) {
+        TPH_Clear_Address();
+        return;
+    }
+    for (uint8_t add = 0; add < 25; ++add) {
         FAST_SET_ADDRESS(add);
         delay_100ns();
-
-        /* Only protect the heating window, never an entire motor/SPI job.
-         * Restore the caller's mask, rather than unconditionally enabling IRQs.
-         */
-        uint32_t saved_primask = __get_PRIMASK();
-        __disable_irq();
-        __DMB();
-        CE_HIGH();
-        delay_100ns();
-
-        // 真实读入每一段数据，不再写死 0x33
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S1_LOW(); delay_ts_400ns(); S1_HIGH();
-        delay_40ns();
-
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S2_LOW(); delay_ts_400ns(); S2_HIGH();
-        delay_40ns();
-
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S3_LOW(); delay_ts_400ns(); S3_HIGH();
-        delay_40ns();
-
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S4_LOW(); delay_ts_400ns(); S4_HIGH();
-        delay_40ns();
-
-        CE_LOW();
-        __DSB();
-        __set_PRIMASK(saved_primask);
-        TPH_Clear_Latches_CE_Low();
-        delay_600ns();
-        delay_ts_400ns();
-	
+        for (uint8_t section = 0; section < 4; ++section) {
+            uint8_t data = pColumn100B[add * 4U + section] & 0x3FU;
+            if (!data) continue; /* no heating pulse for an empty section */
+            FAST_SET_DATA(data);
+            delay_40ns();
+            switch (section) {
+            case 0: S1_LOW(); delay_ts_400ns(); S1_HIGH(); break;
+            case 1: S2_LOW(); delay_ts_400ns(); S2_HIGH(); break;
+            case 2: S3_LOW(); delay_ts_400ns(); S3_HIGH(); break;
+            default: S4_LOW(); delay_ts_400ns(); S4_HIGH(); break;
+            }
+            delay_40ns();
+            TPH_Pulse_Section();
+            /* Previous sections must be zero before enabling the next one. */
+            TPH_Clear_Latches_CE_Low();
+            delay_600ns();
+        }
     }
-
     TPH_Clear_Latches_CE_Low();
     TPH_Clear_Address();
-    CE_LOW();
-		   // 整列打火结束后的主墨水回填等待 (毛细管补墨)
     delay_600ns();
     delay_ts_400ns();
 }
