@@ -364,7 +364,7 @@ void HC32_Realtime_Print_Engine(void) {
     TPH_M0333N_Power(DISABLE);
     uint8_t head_powered = 0U;
     printer_row_audit_t row_audit = {0};
-    printf("[HC32 CONTROL] PCTLv1 ROW_AUDIT_v1 LATCH_RESET_v1 SECTION_PULSE_v1 ready power=OFF\r\n");
+    printf("[HC32 CONTROL] PCTLv1 ROW_AUDIT_v1 LATCH_RESET_v1 ready power=OFF\r\n");
     u8CurrentBufIdx = 0U;
     Slave_Arm_SPI_DMA(u8SelfTestTxBuf, u8PrintBuffer[0], TPH_COLUMN_BYTES);
     GPIO_SetPins(READY_PORT, READY_PIN);

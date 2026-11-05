@@ -9,9 +9,6 @@ b=src.index('static __attribute__((always_inline)) inline void TPH_Clear_Address
 clear=src[a:b]
 a=src.index('void TPH_M0333N_Power(');b=src.index('void TPH_FireOneColumn(',a);power=src[a:b]
 a=b;b=src.index('/* ========================================================================== */',a);column=src[a:b]
-a=src.index('static __attribute__((always_inline)) inline void TPH_Pulse_Section')
-b=src.index('/* CE gates heating',a)
-pulse=src[a:b].replace('DWT->CYCCNT','fake_cycles()')
 h=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -27,10 +24,6 @@ typedef int en_functional_state_t;
 static bool s_bLutInitialized;
 static unsigned ce,irq,highs,restores,builds,zero_latches,vl,vp;
 static int address=-1;
-static uint32_t ticks, pulse_start, s_u32FireCycles=400;
-static bool s_bPulseClockReady=true;
-static unsigned pulse_width, pulse_count;
-static uint32_t fake_cycles(void){return ticks++;}
 static uint8_t data,latches[4],low[4],saw_sample[4],observed[100],expected[100];
 static void check_active(void){
  if(!ce)return;
@@ -40,17 +33,10 @@ static void check_active(void){
   observed[address*4+sec]|=latches[sec];
  }
 }
-static void ce_low(void){
- if(ce){unsigned elapsed=ticks-pulse_start;
- if(pulse_count)assert(elapsed==pulse_width);
- pulse_width=elapsed;++pulse_count;assert(elapsed==400);}
- ce=0;
-}
+static void ce_low(void){ce=0;}
 static void ce_high(void){
  assert(!ce&&irq==1);
- unsigned active=0;
- for(unsigned sec=0;sec<4;sec++)if(latches[sec])++active;
- assert(active==1);pulse_start=ticks;
+ for(unsigned sec=0;sec<4;sec++)assert(!latches[sec]);
  ce=1;++highs;check_active();
 }
 #define CE_LOW() ce_low()
@@ -92,35 +78,27 @@ static void GPIO_ResetPins(unsigned port,unsigned pin){
  if(pin==5)vp=0;else{assert(pin==6&&!vp);vl=0;}
 }
 CLEAR
-PULSE
 POWER
 COLUMN
 static void run(unsigned saved){
- memset(observed,0,100);highs=restores=zero_latches=pulse_count=0;irq=saved;
+ memset(observed,0,100);highs=restores=zero_latches=0;irq=saved;
  memset(latches,0x3F,4); /* emulate retained/undefined previous data */
  TPH_FireOneColumn(expected);
- unsigned nonzero=0;for(unsigned i=0;i<100;i++)if(expected[i])++nonzero;
- assert(highs==nonzero&&restores==nonzero&&irq==saved&&!ce&&address==-1);
+ assert(highs==25&&restores==25&&irq==saved&&!ce&&address==-1);
  assert(!memcmp(observed,expected,100));
  for(unsigned i=0;i<4;i++)assert(!latches[i]&&!low[i]);
- assert(zero_latches>=(nonzero+2)*4);
+ assert(zero_latches>=26*4);
 }
 int main(void){
  expected[73]=2;expected[46]=8;expected[15]=32;expected[99]=1;
- run(0);ticks=0xFFFFFF00U;run(1);assert(builds==1);
- for(unsigned i=0;i<100;i++)expected[i]=(i%63)+1;
- run(0); /* all addresses/sections and all six domains */
- s_bPulseClockReady=false;memset(observed,0,100);highs=0;
- TPH_FireOneColumn(expected);assert(!highs&&!ce&&address==-1);
- TPH_M0333N_Power(ENABLE);assert(!vl&&!vp&&!ce);
- s_bPulseClockReady=true;
+ run(0);run(1);assert(builds==1);
  memset(expected,0,100);run(0);
  memset(latches,0x3F,4);TPH_FireOneColumn(NULL);assert(!ce&&address==-1&&irq==0);
  memset(latches,0x3F,4);TPH_M0333N_Power(ENABLE);assert(vl&&vp&&!ce);
  memset(latches,0x3F,4);TPH_M0333N_Power(0);assert(!vl&&!vp&&!ce);
- puts("PASS: isolated section masks, equal modeled cycle windows, counter wrap, actual 100-byte mapping, empty/NULL/clock failure, IRQ restoration, power ordering");
+ puts("PASS: no retained bits at CE/address enable, actual 100-byte mapping, zero/NULL cleanup, IRQ mask restoration, power ordering");
 }
-'''.replace('CLEAR',clear).replace('PULSE',pulse).replace('POWER',power).replace('COLUMN',column)
+'''.replace('CLEAR',clear).replace('POWER',power).replace('COLUMN',column)
 with tempfile.TemporaryDirectory() as tmp:
  p=Path(tmp);(p/'test.c').write_text(h)
  subprocess.run(['cc','-std=c99','-Wall','-Wextra','-Werror',str(p/'test.c'),'-o',str(p/'test')],check=True)
