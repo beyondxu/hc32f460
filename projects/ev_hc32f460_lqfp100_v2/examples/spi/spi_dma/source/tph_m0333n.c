@@ -204,6 +204,24 @@ static __attribute__((always_inline)) inline void FAST_SET_DATA(uint8_t d_val) {
     CM_GPIO->POSRA = s_DataPortA_Set[idx];
 }
 
+/* CE gates heating, while S1..S4 retain sampled domain bits. Clearing the
+ * external D pins alone does not clear those latches. All clearing below is
+ * performed with CE LOW; it adds no intentional heating pulse.
+ */
+static __attribute__((always_inline)) inline void TPH_Clear_Latches_CE_Low(void) {
+    CE_LOW();
+    FAST_SET_DATA(0);
+    delay_100ns();
+    S1_LOW(); delay_ts_400ns(); S1_HIGH(); delay_40ns();
+    S2_LOW(); delay_ts_400ns(); S2_HIGH(); delay_40ns();
+    S3_LOW(); delay_ts_400ns(); S3_HIGH(); delay_40ns();
+    S4_LOW(); delay_ts_400ns(); S4_HIGH(); delay_40ns();
+    __DSB();
+}
+static __attribute__((always_inline)) inline void TPH_Clear_Address(void) {
+    CM_GPIO->PORRB = ADDR_PORTB_MASK; /* actual Ax=0000000, not LUT index 0 */
+}
+
 /* ========================================================================== */
 /* ★ 4. 喷头 GPIO 引脚初始化与规范上下电                                    ★ */
 /* ========================================================================== */
@@ -258,11 +276,15 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
         delay_10us(); // 严格延时 10us (tpo >= 5us)
 
         printf("[TPH Power] Step 1: Enabling VP Heater Power (PB5)...\r\n");
+        TPH_Clear_Latches_CE_Low();
+        TPH_Clear_Address();
         GPIO_SetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
         delay_10us(); // 严格延时 10us
         
         printf("[TPH Power] Step 2: VL_ENABLE(PB6) and TPH_ENABLE(PB5) asserted; rail voltages NOT measured.\r\n");
     } else {
+        TPH_Clear_Latches_CE_Low();
+        TPH_Clear_Address();
         GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
         delay_10us();
         GPIO_ResetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
@@ -274,7 +296,8 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     if (!s_bLutInitialized) {
         TPH_Build_Fast_LUT();
     }
-    if (pColumn100B == NULL) return;
+    TPH_Clear_Latches_CE_Low();
+    if (pColumn100B == NULL) { TPH_Clear_Address(); return; }
 
     uint32_t data_idx = 0;
 
@@ -282,6 +305,12 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
         FAST_SET_ADDRESS(add);
         delay_100ns();
 
+        /* Only protect the heating window, never an entire motor/SPI job.
+         * Restore the caller's mask, rather than unconditionally enabling IRQs.
+         */
+        uint32_t saved_primask = __get_PRIMASK();
+        __disable_irq();
+        __DMB();
         CE_HIGH();
         delay_100ns();
 
@@ -307,13 +336,16 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
         delay_40ns();
 
         CE_LOW();
+        __DSB();
+        __set_PRIMASK(saved_primask);
+        TPH_Clear_Latches_CE_Low();
         delay_600ns();
         delay_ts_400ns();
 	
     }
 
-    FAST_SET_DATA(0x00);
-    FAST_SET_ADDRESS(0);
+    TPH_Clear_Latches_CE_Low();
+    TPH_Clear_Address();
     CE_LOW();
 		   // 整列打火结束后的主墨水回填等待 (毛细管补墨)
     delay_600ns();
