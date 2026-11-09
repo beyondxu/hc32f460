@@ -1,3 +1,8 @@
+# 当前分支入口
+
+本分支为约2.0us候选，见[CE_TARGET_2US_TEST.md](CE_TARGET_2US_TEST.md)。
+下文为较小缩短档的历史说明。
+
 # CE四段均匀小幅缩短：目标实测约2.2us
 
 基线3e7e161（用户实测CE约2.3us），分支codex/printer-ce-trim-balanced。

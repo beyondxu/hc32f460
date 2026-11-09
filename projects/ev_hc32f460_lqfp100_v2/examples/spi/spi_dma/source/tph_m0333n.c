@@ -312,32 +312,41 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
         __disable_irq();
         __DMB();
         CE_HIGH();
-        delay_100ns();
+        /* 2us target: no extra CE-prefix NOPs. Address setup before CE
+         * and all four S low sample delays remain unchanged. */
 
         // 真实读入每一段数据，不再写死 0x33
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Volatile D clear/set writes precede S LOW. D stays unchanged
+         * for the full sample window. Keep one explicit setup NOP. */
+        __asm volatile ("nop" ::: "memory");
         S1_LOW(); delay_ts_400ns(); S1_HIGH();
         /* Balanced trim: remove the five post-sample NOPs, keep D stable
          * through S rising. Subsequent volatile GPIO writes remain ordered. */
         __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Volatile D clear/set writes precede S LOW. D stays unchanged
+         * for the full sample window. Keep one explicit setup NOP. */
+        __asm volatile ("nop" ::: "memory");
         S2_LOW(); delay_ts_400ns(); S2_HIGH();
         /* Balanced trim: remove the five post-sample NOPs, keep D stable
          * through S rising. Subsequent volatile GPIO writes remain ordered. */
         __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Volatile D clear/set writes precede S LOW. D stays unchanged
+         * for the full sample window. Keep one explicit setup NOP. */
+        __asm volatile ("nop" ::: "memory");
         S3_LOW(); delay_ts_400ns(); S3_HIGH();
         /* Balanced trim: remove the five post-sample NOPs, keep D stable
          * through S rising. Subsequent volatile GPIO writes remain ordered. */
         __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Volatile D clear/set writes precede S LOW. D stays unchanged
+         * for the full sample window. Keep one explicit setup NOP. */
+        __asm volatile ("nop" ::: "memory");
         S4_LOW(); delay_ts_400ns(); S4_HIGH();
         /* Balanced trim: remove the five post-sample NOPs, keep D stable
          * through S rising. Subsequent volatile GPIO writes remain ordered. */
