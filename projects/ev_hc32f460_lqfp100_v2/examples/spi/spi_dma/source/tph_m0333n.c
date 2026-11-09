@@ -318,22 +318,30 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
         FAST_SET_DATA(pColumn100B[data_idx++]);
         delay_40ns();
         S1_LOW(); delay_ts_400ns(); S1_HIGH();
-        delay_40ns();
+        /* Balanced trim: remove the five post-sample NOPs, keep D stable
+         * through S rising. Subsequent volatile GPIO writes remain ordered. */
+        __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
         delay_40ns();
         S2_LOW(); delay_ts_400ns(); S2_HIGH();
-        delay_40ns();
+        /* Balanced trim: remove the five post-sample NOPs, keep D stable
+         * through S rising. Subsequent volatile GPIO writes remain ordered. */
+        __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
         delay_40ns();
         S3_LOW(); delay_ts_400ns(); S3_HIGH();
-        delay_40ns();
+        /* Balanced trim: remove the five post-sample NOPs, keep D stable
+         * through S rising. Subsequent volatile GPIO writes remain ordered. */
+        __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
         delay_40ns();
         S4_LOW(); delay_ts_400ns(); S4_HIGH();
-        delay_40ns();
+        /* Balanced trim: remove the five post-sample NOPs, keep D stable
+         * through S rising. Subsequent volatile GPIO writes remain ordered. */
+        __asm volatile ("" ::: "memory");
 
         CE_LOW();
         __DSB();
