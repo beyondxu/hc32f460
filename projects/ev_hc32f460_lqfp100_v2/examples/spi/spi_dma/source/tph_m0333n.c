@@ -312,28 +312,36 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
         __disable_irq();
         __DMB();
         CE_HIGH();
-        delay_100ns();
+        /* No CE-prefix delay: compare against the user-tested 5-NOP setup. */
 
         // 真实读入每一段数据，不再写死 0x33
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Three setup NOPs (~15ns at 200MHz); identical for all sections.
+         * Keep the complete original S-low sampling delay. */
+        __asm volatile ("nop\n nop\n nop" ::: "memory");
         S1_LOW(); delay_ts_400ns(); S1_HIGH();
-        delay_40ns();
+        __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Three setup NOPs (~15ns at 200MHz); identical for all sections.
+         * Keep the complete original S-low sampling delay. */
+        __asm volatile ("nop\n nop\n nop" ::: "memory");
         S2_LOW(); delay_ts_400ns(); S2_HIGH();
-        delay_40ns();
+        __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Three setup NOPs (~15ns at 200MHz); identical for all sections.
+         * Keep the complete original S-low sampling delay. */
+        __asm volatile ("nop\n nop\n nop" ::: "memory");
         S3_LOW(); delay_ts_400ns(); S3_HIGH();
-        delay_40ns();
+        __asm volatile ("" ::: "memory");
 
         FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
+        /* Three setup NOPs (~15ns at 200MHz); identical for all sections.
+         * Keep the complete original S-low sampling delay. */
+        __asm volatile ("nop\n nop\n nop" ::: "memory");
         S4_LOW(); delay_ts_400ns(); S4_HIGH();
-        delay_40ns();
+        __asm volatile ("" ::: "memory");
 
         CE_LOW();
         __DSB();
