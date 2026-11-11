@@ -17,22 +17,27 @@
 
 此次同时改变A/D的输出方式与地址周期。若改善，不能仅据此宣布“过热已证实”。需要纯周期对照时，可在同一新实现中只调PAD，实测恢复到1.8us再与约1.7us比较，保持输出方式相同。
 
-## Git获取：只替换函数，保留你本地校准的延时
+## Git合并更新：不复制粘贴C代码
 
-完整候选驱动在本分支tph_m0333n.c。为防止覆盖本地校准过的delay_*，推荐只复制 `source/tph_direct_port_fire.inc` 中的宏和完整函数，不切换整个HC仓库分支、不恢复整个C文件。此块依赖已经安装的CONT_CE_v1电源/停止助手，不能用于旧逐地址CE驱动。
+完整驱动、配套文件和检查已经提交到 `codex/printer-direct-port-timing`，功能提交为ca2922e。无需手工抄写函数，也无需新增Keil编译单元。
 
-在你的HC32仓库根目录PowerShell中，逐条执行，报错先停止：
+在你现有的HC32仓库根目录（不是BK仓库），逐条执行，任何一步报错先停止：
 
 ```powershell
-$firePath = "projects/ev_hc32f460_lqfp100_v2/examples/spi/spi_dma/source/tph_m0333n.c"
-if (!(Test-Path "$firePath.before-direct-port.bak")) { Copy-Item $firePath "$firePath.before-direct-port.bak" }
 git fetch origin
-git show origin/codex/printer-direct-port-timing:projects/ev_hc32f460_lqfp100_v2/examples/spi/spi_dma/source/tph_direct_port_fire.inc | Set-Clipboard
+git merge --autostash --no-edit origin/codex/printer-direct-port-timing
+git log -3 --oneline
 ```
 
-上面备份并把新函数放到剪贴板，**尚未修改源文件**。在Keil中用剪贴板内容替换旧TPH_FireOneColumn整个函数，包含前面的宏；不要追加第二个同名函数。保留所有本地delay_*、上下电/重置助手和其他文件。
+- 合入当前分支而非切换分支，Git三方合并会保留不冲突的已提交本地校准；`--autostash`会暂存、合并后恢复未提交的跟踪文件改动。
+- 功能提交没有改共享delay_*定义。临时仓库实际验证过：在7786ad1上修改并提交S采样NOP，再留下未提交的另一延时NOP修改，以上合并装入DIRECT_PORT完整函数且两处校准字节保持一致，无冲突。
+- 这不保证所有未知本地修改都没有冲突。若提示CONFLICT或自动恢复未成功，先不要编译、不要强制覆盖或清掉本地修改，保存Git输出以便处理。
+- 成功后git status仍可能显示原来的本地校准修改，这是自动恢复的正常结果，不要为了变干净而丢弃。Git log可能显示新的合并提交，HEAD不必正好是ca2922e。
+- 如本地还没有CONT_CE_v1，需确认合并完整电源/停止协议，不能把新函数接到旧的逐地址CE实现。
 
-Rebuild All、下载HC32，再整机重启以重新同步BK/HC自检。BK继续上次1/2/1版本 `codex/printer-startup-recovery` / `3d5e316`，不同时换图案、倍数、走纸或供电。
+合并成功后：Keil Rebuild All、下载HC32、整机重启以重新同步BK/HC自检。BK保持上次1/2/1版本 `codex/printer-startup-recovery` / `3d5e316`，不同时更改倍数、走纸、图案或供电。
+
+`source/tph_direct_port_fire.inc`继续作为可审阅的函数副本，但更新不再要求复制这个文本。完整实际编译文件为source/tph_m0333n.c。
 
 ## 先测再打印
 
@@ -62,4 +67,4 @@ Rebuild All、下载HC32，再整机重启以重新同步BK/HC自检。BK继续�
 - 所有共享延时/LUT/GPIO宏以及此函数之外的驱动代码与7786ad1逐字节一致。函数块可独立交付，无需新Keil编译单元。
 - 未完成本地Keil全链接、硬件时序或喷墨验证，不能声称已测到1.7us或已解决偏色。
 
-回退：从备份恢复整个本地C文件或原函数，Rebuild/下载/整机重启；不要把候选表现与不同延时定义或不同BK剂量混在一起。
+回退时保留本地校准与修改，通过Git撤销本次功能变更或使用原有备份；不要直接强制清空工作区。回退后仍需Rebuild/下载/整机重启，不把不同延时定义和不同BK剂量混入对照。
