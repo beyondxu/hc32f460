@@ -32,7 +32,9 @@ static uint16_t s_AddrPortB_Set[25],s_AddrPortB_Clr[25],s_DataPortA_Set[64],s_Da
 static uint32_t SystemCoreClock=200000000;
 static uint32_t tick,irq;
 static bool clock_frozen,vl,vp,ce;
-static uint16_t pa=0x8000,pb,pc,ph;
+static uint16_t pa=0x8000,pb=0x0008,pc,ph;
+static bool checking_ports;
+static uint16_t expected_a_other,expected_b_other;
 static unsigned ce_edges,restores;
 static bool sample_low[4];
 static unsigned sample_a[4],sample_d[4];
@@ -50,13 +52,17 @@ static unsigned data(){
 }
 static unsigned s_state(unsigned s){return s==0?(pc>>15)&1U:s==1?(ph>>1)&1U:s==2?ph&1U:(pc>>14)&1U;}
 static void check_stable(){if(!ce)return;for(unsigned s=0;s<4;++s)if(sample_low[s])assert(sample_a[s]==address()&&sample_d[s]==data());}
-static void store(unsigned port,bool set,uint32_t value){
+static void store(unsigned port,unsigned mode,uint32_t value){
  check_stable();unsigned old_s[4];for(unsigned s=0;s<4;++s)old_s[s]=s_state(s);
  bool old_ce=ce;
  uint16_t *p=port==0?&pa:port==1?&pb:port==2?&pc:&ph;
- if(set)*p|=value;else *p&=~value;
+ if(mode==2)*p=(uint16_t)value;else if(mode)*p|=value;else *p&=~value;
  tick+=2;ce=(pb>>15)&1U;
  assert(pa&0x8000); // unrelated PA15 must survive every data update
+ if(checking_ports){
+  assert((pa&(uint16_t)~DATA_PORTA_MASK)==expected_a_other);
+  assert((pb&(uint16_t)~(ADDR_PORTB_MASK|0x8000U))==expected_b_other);
+ }
  if(ce!=old_ce){++ce_edges;power_events.push_back(ce?3:4);if(ce){assert(vl&&vp);for(unsigned s=0;s<4;++s)assert(s_state(s));}else for(unsigned s=0;s<4;++s)sample_low[s]=false;}
  for(unsigned s=0;s<4;++s){
   if(!ce)continue;
@@ -66,8 +72,12 @@ static void store(unsigned port,bool set,uint32_t value){
  }
  check_stable();
 }
-struct Register {unsigned port;bool set;void operator=(uint32_t value){store(port,set,value);}};
-struct Gpio {Register PORRA{0,false},POSRA{0,true},PORRB{1,false},POSRB{1,true},PORRC{2,false},POSRC{2,true},PORRH{3,false},POSRH{3,true};};
+struct Register {
+ unsigned port,mode;
+ void operator=(uint32_t value){store(port,mode,value);}
+ operator uint32_t() const {if(checking_ports)assert(irq==1);return port==0?pa:pb;}
+};
+struct Gpio {Register PORRA{0,0},POSRA{0,1},PORRB{1,0},POSRB{1,1},PORRC{2,0},POSRC{2,1},PORRH{3,0},POSRH{3,1},PODRA{0,2},PODRB{1,2};};
 static Gpio gpio;
 #define CM_GPIO (&gpio)
 struct Counter {operator uint32_t() const {if(!clock_frozen)++tick;return tick;}};
@@ -85,8 +95,8 @@ static void __set_PRIMASK(uint32_t saved){assert(!address()&&!data());for(unsign
 static void __DMB(){}
 static void __DSB(){}
 static void __ISB(){}
-static void GPIO_SetPins(unsigned port,unsigned pin){assert(port==1&&!ce);if(pin==6){vl=true;power_events.push_back(1);}else{assert(pin==5&&vl);vp=true;power_events.push_back(2);}}
-static void GPIO_ResetPins(unsigned port,unsigned pin){assert(port==1&&!ce);if(pin==5){if(vp)power_events.push_back(5);vp=false;}else{assert(pin==6&&!vp);if(vl)power_events.push_back(6);vl=false;}}
+static void GPIO_SetPins(unsigned port,unsigned pin){assert(port==1&&!ce);store(1,1,1U<<pin);if(pin==6){vl=true;power_events.push_back(1);}else{assert(pin==5&&vl);vp=true;power_events.push_back(2);}}
+static void GPIO_ResetPins(unsigned port,unsigned pin){assert(port==1&&!ce);store(1,0,1U<<pin);if(pin==5){if(vp)power_events.push_back(5);vp=false;}else{assert(pin==6&&!vp);if(vl)power_events.push_back(6);vl=false;}}
 LUT
 LOOKUP
 MACROS
@@ -94,7 +104,13 @@ CORE
 static void run(const std::array<uint8_t,100>& column,unsigned saved){
  std::array<uint8_t,100> original=column;
  unsigned edges=ce_edges,old_restores=restores;trace.clear();irq=saved;
+ // Exercise unrelated GPIO states, including head power enables and CE.
+ pa^=0x0010U;pb^=0x0080U;
+ expected_a_other=pa&(uint16_t)~DATA_PORTA_MASK;
+ expected_b_other=pb&(uint16_t)~(ADDR_PORTB_MASK|0x8000U);
+ checking_ports=true;
  TPH_FireOneColumn(column.data());
+ checking_ports=false;
  assert(original==column&&ce&&vl&&vp&&!address()&&!data()&&irq==saved);
  assert(ce_edges==edges&&restores==old_restores+1);
  std::vector<Sample> live;
@@ -113,7 +129,7 @@ static void run(const std::array<uint8_t,100>& column,unsigned saved){
 int main(){
  std::array<uint8_t,100> c{};
  TPH_FireOneColumn(c.data());assert(trace.empty()&&!ce);
- TPH_M0333N_Power(ENABLE);assert(ce&&vl&&vp);
+ TPH_M0333N_Power(ENABLE);assert(ce&&vl&&vp&&(pb&0x60U)==0x60U);
  assert((power_events==std::vector<unsigned>{1,2,3}));
  unsigned e=ce_edges;TPH_M0333N_Power(ENABLE);assert(ce_edges==e);
  for(unsigned bit=0;bit<6;++bit){c.fill(1U<<bit);run(c,bit&1U);}

@@ -311,44 +311,57 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
     }
 }
 
+/* TPH_DIRECT_PORT_v1: fewer GPIO writes; S sampling helpers are unchanged.
+ * Requires the continuous-CE power/stop protocol, never the old pulsed-CE one.
+ * Re-measure all S widths and matching-S address periods after the local build.
+ * No claim of 1.70 us is made by this source code.
+ */
+#ifndef TPH_DIRECT_PORT_PAD_NOPS
+#define TPH_DIRECT_PORT_PAD_NOPS 0
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS < 0 || TPH_DIRECT_PORT_PAD_NOPS > 16 || (TPH_DIRECT_PORT_PAD_NOPS % 4) != 0
+#error TPH_DIRECT_PORT_PAD_NOPS must be 0, 4, 8, 12 or 16
+#endif
+
 void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     if (!s_bHeadPowered || pColumn100B == NULL) return;
 
-    /* Predecode the complete column PLUS one zero stop group while idle.
-     * The 26th entry uses Add25 again, not Add1 and not an out-of-range LUT.
-     * All entries follow the same live loop path, including the stop entry.
-     * 26 * 5 * 4 = 520 bytes of automatic storage; no heap allocation.
-     */
     struct tph_group {
         uint32_t address;
         uint32_t data[4];
     } groups[26];
+    /* Decode while no nozzle is active. Entry 26 stops Add25 with zero data. */
     for (unsigned add = 0; add < 26U; ++add) {
         unsigned index = add < 25U ? add : 24U;
-        groups[add].address = ((uint32_t)s_AddrPortB_Clr[index] << 16)
-                           | s_AddrPortB_Set[index];
+        groups[add].address = s_AddrPortB_Set[index];
         for (unsigned sec = 0; sec < 4U; ++sec) {
             unsigned d = add < 25U ? (pColumn100B[add * 4U + sec] & 0x3FU) : 0U;
-            groups[add].data[sec] = ((uint32_t)s_DataPortA_Clr[d] << 16)
-                                | s_DataPortA_Set[d];
+            groups[add].data[sec] = s_DataPortA_Set[d];
         }
     }
     if (s_bHaveStopTime) {
         while ((uint32_t)(DWT->CYCCNT - s_u32StopCycle) < s_u32IdleCycles) {
-            /* CE HIGH, Ax=0, all latches zero: no active heating here. */
+            /* Preserve the existing 60 us completed-column idle guard. */
         }
     }
 
     uint32_t saved_primask = __get_PRIMASK();
     __disable_irq();
+    /* Snapshot OUTPUT latches, not input pins, after IRQ exclusion.
+     * Preserve CE, VL/VP enables and unrelated GPIO outputs in every word.
+     * No concurrent DMA or other core may write these same GPIO output latches.
+     * Normal HC32 print firmware has one owner of these port outputs.
+     */
+    const uint32_t keep_a = CM_GPIO->PODRA & (uint16_t)~DATA_PORTA_MASK;
+    const uint32_t keep_b = CM_GPIO->PODRB & (uint16_t)~ADDR_PORTB_MASK;
+    for (unsigned add = 0; add < 26U; ++add) {
+        groups[add].address |= keep_b;
+        for (unsigned sec = 0; sec < 4U; ++sec) groups[add].data[sec] |= keep_a;
+    }
     __DMB();
     const struct tph_group *group = groups;
     const struct tph_group *end = groups + 26U;
     do {
-        /* No source buffer reads, LUT lookups, logging, timers or IRQ service
-         * in the live train. Only prepared-word loads and GPIO/S operations.
-         * Group overhead IS part of tFire; there is no extra 1 us wait.
-         */
         uint32_t address = group->address;
         uint32_t w0 = group->data[0];
         uint32_t w1 = group->data[1];
@@ -356,30 +369,37 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
         uint32_t w3 = group->data[3];
         __asm volatile ("" : "+r" (address), "+r" (w0), "+r" (w1),
                               "+r" (w2), "+r" (w3) : : "memory");
-        CM_GPIO->PORRB = address >> 16;
-        CM_GPIO->POSRB = (uint16_t)address;
+        CM_GPIO->PODRB = (uint16_t)address;
 
-        CM_GPIO->PORRA = w0 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w0;
+        CM_GPIO->PODRA = (uint16_t)w0;
         S1_LOW(); delay_ts_400ns(); S1_HIGH();
 
-        CM_GPIO->PORRA = w1 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w1;
+        CM_GPIO->PODRA = (uint16_t)w1;
         S2_LOW(); delay_ts_400ns(); S2_HIGH();
 
-        CM_GPIO->PORRA = w2 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w2;
+        CM_GPIO->PODRA = (uint16_t)w2;
         S3_LOW(); delay_ts_400ns(); S3_HIGH();
 
-        CM_GPIO->PORRA = w3 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w3;
+        CM_GPIO->PODRA = (uint16_t)w3;
         S4_LOW(); delay_ts_400ns(); S4_HIGH();
+        /* Optional calibrated address-period padding, never inside an S LOW.
+         * These are counts of NOP instructions, not certified nanoseconds.
+         */
+#if TPH_DIRECT_PORT_PAD_NOPS >= 4
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 8
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 12
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 16
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
         ++group;
     } while (group != end);
 
-    /* All four sections have now sampled ZERO at Add25, at the normal cadence.
-     * Only now enter global reset/idle. CE remains HIGH until power OFF.
-     */
     TPH_Reset_Idle_CE_High();
     s_u32StopCycle = DWT->CYCCNT;
     s_bHaveStopTime = true;

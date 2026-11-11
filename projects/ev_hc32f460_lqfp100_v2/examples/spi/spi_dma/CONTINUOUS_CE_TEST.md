@@ -1,3 +1,5 @@
+> 当前分支包含DIRECT_PORT_v1函数候选。连续CE电源/停止协议不变；函数获取、保留本地延时及实测要求请以 [DIRECT_PORT_TIMING_TEST.md](DIRECT_PORT_TIMING_TEST.md) 为准。以下保留原连续CE流程说明。
+
 # M0333N 连续 CE 完整驱动候选：CONT_CE_v1
 
 本版本取代逐地址切换 CE 的候选实现。依据 M0333N V1.2 印刷页 11、12 及用户与技术支持确认：CE 在上电流程拉高，正常打印、停止、重置均保持高，下电流程才拉低。旧的 CE=1.7us 测量不能代表此版本 tFire。
