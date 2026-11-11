@@ -204,22 +204,187 @@ static __attribute__((always_inline)) inline void FAST_SET_DATA(uint8_t d_val) {
     CM_GPIO->POSRA = s_DataPortA_Set[idx];
 }
 
-/* CE gates heating, while S1..S4 retain sampled domain bits. Clearing the
- * external D pins alone does not clear those latches. All clearing below is
- * performed with CE LOW; it adds no intentional heating pulse.
+/* TPH_CONTINUOUS_CE_v1 -- M0333N continuous-CE protocol.
+ * Requires the existing GPIO macros, LUTs and calibrated delay helpers above.
+ * CE width is NOT tFire. Measure matching S falling edges in adjacent groups.
+ * This code does not claim a calibrated 1.70 us address period.
  */
-static __attribute__((always_inline)) inline void TPH_Clear_Latches_CE_Low(void) {
-    CE_LOW();
+static bool s_bHeadPowered = false;
+static bool s_bHaveStopTime = false;
+static uint32_t s_u32StopCycle;
+static uint32_t s_u32IdleCycles;
+
+static __attribute__((always_inline)) inline void TPH_Clear_Address(void) {
+    CM_GPIO->PORRB = ADDR_PORTB_MASK; /* Ax=0000000, NOT LUT index zero */
+}
+
+static __attribute__((always_inline)) inline void TPH_All_S_Low(void) {
+    S1_LOW(); S2_LOW(); S3_LOW(); S4_LOW();
+}
+
+static __attribute__((always_inline)) inline void TPH_All_S_High(void) {
+    S1_HIGH(); S2_HIGH(); S3_HIGH(); S4_HIGH();
+}
+
+/* Only call with CE HIGH and Ax=0000000, or with all heating already stopped.
+ * Four zero-data samples implement the documented initialization/reset state.
+ * There is deliberately no CE_LOW() here.
+ */
+static __attribute__((always_inline)) inline void TPH_Reset_Idle_CE_High(void) {
+    TPH_Clear_Address();
     FAST_SET_DATA(0);
-    delay_100ns();
-    S1_LOW(); delay_ts_400ns(); S1_HIGH(); delay_40ns();
-    S2_LOW(); delay_ts_400ns(); S2_HIGH(); delay_40ns();
-    S3_LOW(); delay_ts_400ns(); S3_HIGH(); delay_40ns();
-    S4_LOW(); delay_ts_400ns(); S4_HIGH(); delay_40ns();
+    S1_LOW(); delay_ts_400ns(); S1_HIGH();
+    S2_LOW(); delay_ts_400ns(); S2_HIGH();
+    S3_LOW(); delay_ts_400ns(); S3_HIGH();
+    S4_LOW(); delay_ts_400ns(); S4_HIGH();
     __DSB();
 }
-static __attribute__((always_inline)) inline void TPH_Clear_Address(void) {
-    CM_GPIO->PORRB = ADDR_PORTB_MASK; /* actual Ax=0000000, not LUT index 0 */
+
+/* DWT is used only while the head is idle, never inside the live address train.
+ * Do not reset CYCCNT: another component may also use the free-running counter.
+ */
+static bool TPH_Start_Idle_Clock(void) {
+    if (SystemCoreClock == 0U) return false;
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    __DSB(); __ISB();
+    uint32_t before = DWT->CYCCNT;
+    for (unsigned i = 0; i < 1000U; ++i) {
+        if (DWT->CYCCNT != before) {
+            /* Conservative 60 us IDLE gap after each completed column.
+             * This is a diagnostic margin, not a per-address specification.
+             */
+            s_u32IdleCycles = (uint32_t)(((uint64_t)SystemCoreClock * 60U
+                                         + 999999U) / 1000000U);
+            return true;
+        }
+    }
+    return false;
+}
+
+void TPH_M0333N_Power(en_functional_state_t enState) {
+    if (ENABLE == enState) {
+        if (s_bHeadPowered) return; /* Do not reset a live session. */
+        if (!s_bLutInitialized) TPH_Build_Fast_LUT();
+        CE_LOW();
+        TPH_Clear_Address();
+        FAST_SET_DATA(0);
+        TPH_All_S_Low();
+        GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
+        GPIO_ResetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
+        if (!TPH_Start_Idle_Clock()) {
+            printf("[TPH ERROR] idle clock unavailable; head remains OFF\r\n");
+            return;
+        }
+        GPIO_SetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
+        delay_10us(); /* VL -> VP: tpo >= 5 us */
+        GPIO_SetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
+        delay_10us(); /* VP -> S HIGH: tw >= 0.5 us */
+        TPH_All_S_High();
+        delay_10us(); /* S HIGH -> CE HIGH; conservative tn margin */
+        CE_HIGH();
+        TPH_Reset_Idle_CE_High();
+        s_bHaveStopTime = false;
+        s_bHeadPowered = true;
+        printf("[TPH Power] CONT_CE_v1 ON CE=HIGH idle=Ax0_Dx0; rails unmeasured\r\n");
+    } else {
+        if (s_bHeadPowered) {
+            /* The last column has already received its Add25 zero stop.
+             * Reset at Ax=0 with CE still HIGH before the shutdown sequence.
+             */
+            TPH_Reset_Idle_CE_High();
+            CE_LOW();
+            delay_10us(); /* CE LOW -> S LOW */
+        } else {
+            CE_LOW();
+            TPH_Clear_Address();
+            FAST_SET_DATA(0);
+        }
+        TPH_All_S_Low();
+        delay_10us(); /* S LOW -> VP OFF: tw >= 0.5 us */
+        GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
+        delay_10us(); /* VP OFF -> VL OFF: tpf >= 5 us */
+        GPIO_ResetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
+        s_bHeadPowered = false;
+        s_bHaveStopTime = false;
+        printf("[TPH Power] CONT_CE_v1 OFF CE=LOW\r\n");
+    }
+}
+
+void TPH_FireOneColumn(const uint8_t *pColumn100B) {
+    if (!s_bHeadPowered || pColumn100B == NULL) return;
+
+    /* Predecode the complete column PLUS one zero stop group while idle.
+     * The 26th entry uses Add25 again, not Add1 and not an out-of-range LUT.
+     * All entries follow the same live loop path, including the stop entry.
+     * 26 * 5 * 4 = 520 bytes of automatic storage; no heap allocation.
+     */
+    struct tph_group {
+        uint32_t address;
+        uint32_t data[4];
+    } groups[26];
+    for (unsigned add = 0; add < 26U; ++add) {
+        unsigned index = add < 25U ? add : 24U;
+        groups[add].address = ((uint32_t)s_AddrPortB_Clr[index] << 16)
+                           | s_AddrPortB_Set[index];
+        for (unsigned sec = 0; sec < 4U; ++sec) {
+            unsigned d = add < 25U ? (pColumn100B[add * 4U + sec] & 0x3FU) : 0U;
+            groups[add].data[sec] = ((uint32_t)s_DataPortA_Clr[d] << 16)
+                                | s_DataPortA_Set[d];
+        }
+    }
+    if (s_bHaveStopTime) {
+        while ((uint32_t)(DWT->CYCCNT - s_u32StopCycle) < s_u32IdleCycles) {
+            /* CE HIGH, Ax=0, all latches zero: no active heating here. */
+        }
+    }
+
+    uint32_t saved_primask = __get_PRIMASK();
+    __disable_irq();
+    __DMB();
+    const struct tph_group *group = groups;
+    const struct tph_group *end = groups + 26U;
+    do {
+        /* No source buffer reads, LUT lookups, logging, timers or IRQ service
+         * in the live train. Only prepared-word loads and GPIO/S operations.
+         * Group overhead IS part of tFire; there is no extra 1 us wait.
+         */
+        uint32_t address = group->address;
+        uint32_t w0 = group->data[0];
+        uint32_t w1 = group->data[1];
+        uint32_t w2 = group->data[2];
+        uint32_t w3 = group->data[3];
+        __asm volatile ("" : "+r" (address), "+r" (w0), "+r" (w1),
+                              "+r" (w2), "+r" (w3) : : "memory");
+        CM_GPIO->PORRB = address >> 16;
+        CM_GPIO->POSRB = (uint16_t)address;
+
+        CM_GPIO->PORRA = w0 >> 16;
+        CM_GPIO->POSRA = (uint16_t)w0;
+        S1_LOW(); delay_ts_400ns(); S1_HIGH();
+
+        CM_GPIO->PORRA = w1 >> 16;
+        CM_GPIO->POSRA = (uint16_t)w1;
+        S2_LOW(); delay_ts_400ns(); S2_HIGH();
+
+        CM_GPIO->PORRA = w2 >> 16;
+        CM_GPIO->POSRA = (uint16_t)w2;
+        S3_LOW(); delay_ts_400ns(); S3_HIGH();
+
+        CM_GPIO->PORRA = w3 >> 16;
+        CM_GPIO->POSRA = (uint16_t)w3;
+        S4_LOW(); delay_ts_400ns(); S4_HIGH();
+        ++group;
+    } while (group != end);
+
+    /* All four sections have now sampled ZERO at Add25, at the normal cadence.
+     * Only now enter global reset/idle. CE remains HIGH until power OFF.
+     */
+    TPH_Reset_Idle_CE_High();
+    s_u32StopCycle = DWT->CYCCNT;
+    s_bHaveStopTime = true;
+    __DSB();
+    __set_PRIMASK(saved_primask);
 }
 
 /* ========================================================================== */
@@ -251,7 +416,7 @@ void TPH_M0333N_Init(void) {
     GPIO_Init(PIN_A7_PORT, PIN_A7_PIN, &stcGpioInit);
 
     // 4. S1~S4 锁存线 (默认高电平锁存)
-    stcGpioInit.u16PinState = PIN_STAT_SET;
+    stcGpioInit.u16PinState = PIN_STAT_RST;
     GPIO_Init(PIN_S1_PORT, PIN_S1_PIN, &stcGpioInit);
     GPIO_Init(PIN_S2_PORT, PIN_S2_PIN, &stcGpioInit);
     GPIO_Init(PIN_S3_PORT, PIN_S3_PIN, &stcGpioInit);
@@ -269,292 +434,21 @@ void TPH_M0333N_Init(void) {
     TPH_Build_Fast_LUT();
 }
 
-void TPH_M0333N_Power(en_functional_state_t enState) {
-    if (ENABLE == enState) {
-        printf("[TPH Power] Step 0: Enabling VL Logic Power (PB6)...\r\n");
-        GPIO_SetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
-        delay_10us(); // 严格延时 10us (tpo >= 5us)
-
-        printf("[TPH Power] Step 1: Enabling VP Heater Power (PB5)...\r\n");
-        TPH_Clear_Latches_CE_Low();
-        TPH_Clear_Address();
-        GPIO_SetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
-        delay_10us(); // 严格延时 10us
-        
-        printf("[TPH Power] Step 2: VL_ENABLE(PB6) and TPH_ENABLE(PB5) asserted; rail voltages NOT measured.\r\n");
-    } else {
-        TPH_Clear_Latches_CE_Low();
-        TPH_Clear_Address();
-        GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
-        delay_10us();
-        GPIO_ResetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
-        printf("[TPH Power] VL and VP Powered OFF.\r\n");
-    }
+/* Compatibility entry points all use the same continuous-CE protocol. */
+void TPH_FireOneColumn_fix(const uint8_t *unused) {
+    uint8_t column[100];
+    (void)unused;
+    memset(column, 0x33, sizeof(column));
+    TPH_FireOneColumn(column);
 }
-
-/* TPH_PREPARED_CE_v1: prepare D words outside CE; no added A/D/S waits.
- * Keep the existing sampling, latch reset, quiet delays and IRQ restoration.
- * Actual CE and S widths must be checked after the local Keil rebuild. */
-void TPH_FireOneColumn(const uint8_t *pColumn100B) {
-    if (!s_bLutInitialized) {
-        TPH_Build_Fast_LUT();
-    }
-    TPH_Clear_Latches_CE_Low();
-    if (pColumn100B == NULL) { TPH_Clear_Address(); return; }
-
-    uint32_t data_idx = 0;
-    for (uint8_t add = 0; add < 25; ++add) {
-        /* All input reads and table lookups happen while CE is LOW.
-         * Pack clear bits in the high half, set bits in the low half. */
-        uint8_t d0 = pColumn100B[data_idx++] & 0x3FU;
-        uint8_t d1 = pColumn100B[data_idx++] & 0x3FU;
-        uint8_t d2 = pColumn100B[data_idx++] & 0x3FU;
-        uint8_t d3 = pColumn100B[data_idx++] & 0x3FU;
-        uint32_t w0 = ((uint32_t)s_DataPortA_Clr[d0] << 16) | s_DataPortA_Set[d0];
-        uint32_t w1 = ((uint32_t)s_DataPortA_Clr[d1] << 16) | s_DataPortA_Set[d1];
-        uint32_t w2 = ((uint32_t)s_DataPortA_Clr[d2] << 16) | s_DataPortA_Set[d2];
-        uint32_t w3 = ((uint32_t)s_DataPortA_Clr[d3] << 16) | s_DataPortA_Set[d3];
-        /* Force prepared words into registers before the heating window. */
-        __asm volatile ("" : "+r" (w1), "+r" (w2), "+r" (w3) : : "memory");
-
-        uint32_t saved_primask = __get_PRIMASK();
-        __disable_irq();
-        FAST_SET_ADDRESS(add);
-        CM_GPIO->PORRA = w0 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w0;
-        __DMB();
-
-        CE_HIGH();
-        S1_LOW(); delay_ts_400ns(); S1_HIGH();
-
-        CM_GPIO->PORRA = w1 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w1;
-        S2_LOW(); delay_ts_400ns(); S2_HIGH();
-
-        CM_GPIO->PORRA = w2 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w2;
-        S3_LOW(); delay_ts_400ns(); S3_HIGH();
-
-        CM_GPIO->PORRA = w3 >> 16;
-        CM_GPIO->POSRA = (uint16_t)w3;
-        S4_LOW(); delay_ts_400ns(); S4_HIGH();
-        CE_LOW();
-
-        __DSB();
-        __set_PRIMASK(saved_primask);
-        TPH_Clear_Latches_CE_Low();
-        delay_600ns();
-        delay_ts_400ns();
-    }
-
-    TPH_Clear_Latches_CE_Low();
-    TPH_Clear_Address();
-    CE_LOW();
-    delay_600ns();
-    delay_ts_400ns();
+void TPH_FireOneColumnxx(const uint8_t *column) {
+    TPH_FireOneColumn(column);
 }
-/* ========================================================================== */
-/* ★ 5. 核心打火函数 (CE 高电平严格覆盖 S1~S4 全过程，脉宽精确收敛在 2.10us) ★ */
-/* ========================================================================== */
-void TPH_FireOneColumn_fix(const uint8_t *pColumn100B) {
-    (void)pColumn100B; // 强制测试绿色
-     uint32_t data_idx = 0; // 0 ~ 99 字节游标
-    if (!s_bLutInitialized) {
-        TPH_Build_Fast_LUT();
-    }
-
-    // ★ 强制测试绿色通道 (D1,D2 青色 + D5,D6 黄色)
-    // 如需测试单一颜色：
-    // 0x03: 仅青色 (Cyan)
-    // 0x0C: 仅品红 (Magenta)
-    // 0x30: 仅黄色 (Yellow)
-    const uint8_t FORCED_COLOR_DATA = 0x33;
-
-    // 轮询 25 组地址 (Add 1 ~ Add 25)
-    for (uint8_t add = 0; add < 25; add++) {
-        // ----------------------------------------------------
-        // 步骤 1：在 CE=0 安全期并发切换 7 根地址线
-        // ----------------------------------------------------
-        FAST_SET_ADDRESS(add);
-        delay_100ns(); // 100ns 纯汇编延时
-
-        // ----------------------------------------------------
-        // 步骤 2：★ 正确时序：拉高 CE！CE 高电平门控开始覆盖本地址打火 ★
-        // ----------------------------------------------------
-        CE_HIGH();
-        delay_100ns();
-
-        // ----------------------------------------------------
-        // 步骤 3：在 CE 保持高电平的窗口内，依次触发 S1 ~ S4 采样与点火
-        // ----------------------------------------------------
-        // ---- Section 1 ----
-        FAST_SET_DATA(FORCED_COLOR_DATA);
-        delay_40ns();
-        S1_LOW();  delay_ts_400ns(); S1_HIGH(); // 400ns 精准负脉冲
-        delay_40ns();
-
-        // ---- Section 2 ----
-        FAST_SET_DATA(FORCED_COLOR_DATA);
-        delay_40ns();
-        S2_LOW();  delay_ts_400ns(); S2_HIGH();
-        delay_40ns();
-
-        // ---- Section 3 ----
-        FAST_SET_DATA(FORCED_COLOR_DATA);
-        delay_40ns();
-        S3_LOW();  delay_ts_400ns(); S3_HIGH();
-        delay_40ns();
-
-        // ---- Section 4 ----
-        FAST_SET_DATA(FORCED_COLOR_DATA);
-        delay_40ns();
-        S4_LOW();  delay_ts_400ns(); S4_HIGH();
-        delay_40ns();
-
-        // ----------------------------------------------------
-        // 步骤 4：★ S4 一结束立即拉低 CE！关断发热！★
-        // 此时 CE 高电平总时长 = 100ns + 4 * (50+400+50)ns = 2.10us！
-        // 绝不多通 1 纳秒，严格锁定在 tFire 标准的 2.0us ~ 2.2us！
-        // ----------------------------------------------------
-        CE_LOW();
-
-        // 步骤 5：墨水腔回填微延时
-        delay_600ns();
-				
-				delay_ts_400ns();
-    }
-
-    // 停止时序
-    FAST_SET_DATA(0x00);
-    FAST_SET_ADDRESS(0);
-    CE_LOW();
-}
-/* ========================================================================== */
-/* ★ 5. 核心打火函数 (CE 高电平严格覆盖 S1~S4 全过程，脉宽精确收敛在 2.10us) ★ */
-/* ========================================================================== */
-void TPH_FireOneColumnxx(const uint8_t *pColumn100B) {
-    (void)pColumn100B; // 强制测试绿色
-     uint32_t data_idx = 0; // 0 ~ 99 字节游标
-    if (!s_bLutInitialized) {
-        TPH_Build_Fast_LUT();
-    }
-
-    // ★ 强制测试绿色通道 (D1,D2 青色 + D5,D6 黄色)
-    // 如需测试单一颜色：
-    // 0x03: 仅青色 (Cyan)
-    // 0x0C: 仅品红 (Magenta)
-    // 0x30: 仅黄色 (Yellow)
-   // const uint8_t FORCED_COLOR_DATA = 0x03;
-
-    // 轮询 25 组地址 (Add 1 ~ Add 25)
-    for (uint8_t add = 0; add < 25; add++) {
-        // ----------------------------------------------------
-        // 步骤 1：在 CE=0 安全期并发切换 7 根地址线
-        // ----------------------------------------------------
-        FAST_SET_ADDRESS(add);
-        delay_100ns(); // 100ns 纯汇编延时
-
-        // ----------------------------------------------------
-        // 步骤 2：★ 正确时序：拉高 CE！CE 高电平门控开始覆盖本地址打火 ★
-        // ----------------------------------------------------
-        CE_HIGH();
-        delay_100ns();
-
-        // ----------------------------------------------------
-        // 步骤 3：在 CE 保持高电平的窗口内，依次触发 S1 ~ S4 采样与点火
-        // ----------------------------------------------------
-        // ---- Section 1 ----
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S1_LOW();  delay_ts_400ns(); S1_HIGH(); // 400ns 精准负脉冲
-        delay_40ns();
-
-        // ---- Section 2 ----
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S2_LOW();  delay_ts_400ns(); S2_HIGH();
-        delay_40ns();
-
-        // ---- Section 3 ----
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S3_LOW();  delay_ts_400ns(); S3_HIGH();
-        delay_40ns();
-
-        // ---- Section 4 ----
-        FAST_SET_DATA(pColumn100B[data_idx++]);
-        delay_40ns();
-        S4_LOW();  delay_ts_400ns(); S4_HIGH();
-        delay_40ns();
-
-        // ----------------------------------------------------
-        // 步骤 4：★ S4 一结束立即拉低 CE！关断发热！★
-        // 此时 CE 高电平总时长 = 100ns + 4 * (50+400+50)ns = 2.10us！
-        // 绝不多通 1 纳秒，严格锁定在 tFire 标准的 2.0us ~ 2.2us！
-        // ----------------------------------------------------
-        CE_LOW();
-
-        // 步骤 5：墨水腔回填微延时
-        delay_600ns();
-				delay_ts_400ns();
-    }
-
-    // 停止时序
-    FAST_SET_DATA(0x00);
-    FAST_SET_ADDRESS(0);
-    CE_LOW();
-}
-/**
- * @brief ★ HC32 纯硬件底层单线直打自检 (严格符合第 11/14 页原厂波形图) ★
- */
 void HC32_Standalone_Hardware_Test(void) {
-    printf("\r\n>>> [HC32 TEST] Firing 100%% Specification-Compliant Waveform <<<\r\n");
-
-    // 模拟连续扫掠 600 列
-    for (int col = 0; col < 600; col++) {
-        
-        // CE 全程保持为高电平！
-        CE_HIGH();
-        delay_100ns();
-
-        // 只在一个固定的地址打火 (比如 Address 10)
-        FAST_SET_ADDRESS(10);
-        delay_100ns();
-
-        // Section 1: 只打这一处，其余为 0
-        // 0x15 代表 D1, D3, D5 三色偶喷孔全开 (纯黑色！)
-        FAST_SET_DATA(0x15);
-        delay_40ns();
-        S1_LOW();  delay_ts_400ns(); S1_HIGH();
-        delay_40ns();
-
-        // Section 2, 3, 4 全部填 0x00
-        FAST_SET_DATA(0x00);
-        delay_40ns();
-        S2_LOW();  delay_ts_400ns(); S2_HIGH();
-        delay_40ns();
-
-        FAST_SET_DATA(0x00);
-        delay_40ns();
-        S3_LOW();  delay_ts_400ns(); S3_HIGH();
-        delay_40ns();
-
-        FAST_SET_DATA(0x00);
-        delay_40ns();
-        S4_LOW();  delay_ts_400ns(); S4_HIGH();
-        delay_40ns();
-
-        // 停止时序
-        FAST_SET_ADDRESS(0);
-        FAST_SET_DATA(0x00);
-        CE_LOW();
-
-        // 回填等待
-        delay_600ns();
-        delay_ts_400ns();
-
-        DDL_DelayMS(2); // 模拟字车移动步进
+    uint8_t column[100] = {0};
+    column[10U * 4U] = 0x15;
+    for (unsigned i = 0; i < 600U; ++i) {
+        TPH_FireOneColumn(column);
+        DDL_DelayMS(2);
     }
-
-    printf(">>> [HC32 TEST] Finished! Check Paper! <<<\r\n");
 }

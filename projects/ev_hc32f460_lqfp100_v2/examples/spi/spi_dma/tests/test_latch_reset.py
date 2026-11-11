@@ -1,128 +1,138 @@
-"""Model S-latch behavior around the actual production column/power functions.
-This verifies sequencing, NOT physical nanosecond pulse widths or ink behavior.
+"""Run the actual continuous-CE driver against GPIO/clock/IRQ trace models.
+Logical protocol checks only; host time is not a prediction of M4 nanoseconds.
 """
 from pathlib import Path
-import subprocess,tempfile,re,os
-src=(Path(__file__).resolve().parents[1]/'source/tph_m0333n.c').read_bytes().decode('latin1')
-a=src.index('static __attribute__((always_inline)) inline void TPH_Clear_Latches_CE_Low')
-b=src.index('static __attribute__((always_inline)) inline void TPH_Clear_Address',a)
-clear=src[a:b]
-a=src.index('void TPH_M0333N_Power(');b=src.index('void TPH_FireOneColumn(',a);power=src[a:b]
-a=b;b=src.index('/* ========================================================================== */',a);column=src[a:b]
-# Model the actual prepared register stores, retaining the real LUT generation.
-prepared = 'CM_GPIO->PORRA = w0 >> 16;' in column
-lookup = ''
-if prepared:
- a=src.index('static const uint8_t s_u8AddrLut[25]');b=src.index('};',a)+2
- lut=src[a:b]
- a=src.index('void TPH_Build_Fast_LUT(void)');b=src.index('static __attribute__((always_inline)) inline void FAST_SET_ADDRESS',a)
- lookup=lut+'\n'+src[a:b].replace('void TPH_Build_Fast_LUT(void)', 'static void TPH_Build_Fast_LUT_actual(void)')
- column,n=re.subn(r'CM_GPIO->PORRA = ([^;]+);',r'host_clear_data(\1);',column);assert n==4
- column,n=re.subn(r'CM_GPIO->POSRA = ([^;]+);',r'host_set_data(\1);',column);assert n==4
-
+import subprocess,tempfile,os,re
+P=Path(__file__).resolve().parents[1]; S=P/'source'
+src=(S/'tph_m0333n.c').read_bytes().decode('latin1')
+a=src.index('static const uint8_t s_u8AddrLut[25]');b=src.index('};',a)+2
+lut=src[a:b]
+a=src.index('void TPH_Build_Fast_LUT(void)');b=src.index('/* TPH_CONTINUOUS_CE_v1',a)
+lookup=src[a:b]
+core=(S/'tph_continuous_ce.inc').read_text()
+assert core in src
+macros='\n'.join(re.findall(r'^#define (?:S[1-4]_(?:LOW|HIGH)|CE_(?:LOW|HIGH))\(\).*$',src,re.M))
 h=r'''
-#include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-typedef int en_functional_state_t;
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+#include <array>
+using en_functional_state_t=int;
 #define ENABLE 1
 #define PIN_VL_EN_PORT 1
 #define PIN_VL_EN_PIN 6
 #define PIN_TPH_EN_PORT 1
 #define PIN_TPH_EN_PIN 5
-static bool s_bLutInitialized;
-static unsigned ce,irq,highs,restores,builds,zero_latches,vl,vp;
-static int address=-1;
-static uint8_t data,latches[4],low[4],saw_sample[4],observed[100],expected[100];
 #define ADDR_PORTB_MASK 0x7407U
 #define DATA_PORTA_MASK 0x050FU
+static bool s_bLutInitialized;
 static uint16_t s_AddrPortB_Set[25],s_AddrPortB_Clr[25],s_DataPortA_Set[64],s_DataPortA_Clr[64];
-static uint32_t physical_pins=0x8000U;
-static void check_active(void){
- if(!ce)return;
- assert(irq==1&&address>=0&&address<25);
- for(unsigned sec=0;sec<4;sec++){
-  assert(!(latches[sec]&~expected[address*4+sec]));
-  observed[address*4+sec]|=latches[sec];
+static uint32_t SystemCoreClock=200000000;
+static uint32_t tick,irq;
+static bool clock_frozen,vl,vp,ce;
+static uint16_t pa=0x8000,pb,pc,ph;
+static unsigned ce_edges,restores;
+static bool sample_low[4];
+static unsigned sample_a[4],sample_d[4];
+static uint32_t sample_t[4];
+struct Sample {unsigned a,d,s;uint32_t time;};
+static std::vector<Sample> trace;
+static std::vector<unsigned> power_events;
+static unsigned address(){
+ static const unsigned pin[7]={2,10,1,12,14,13,0};unsigned a=0;
+ for(unsigned i=0;i<7;++i)a|=((pb>>pin[i])&1U)<<i;return a;
+}
+static unsigned data(){
+ static const unsigned pin[6]={0,2,1,10,8,3};unsigned d=0;
+ for(unsigned i=0;i<6;++i)d|=((pa>>pin[i])&1U)<<i;return d;
+}
+static unsigned s_state(unsigned s){return s==0?(pc>>15)&1U:s==1?(ph>>1)&1U:s==2?ph&1U:(pc>>14)&1U;}
+static void check_stable(){if(!ce)return;for(unsigned s=0;s<4;++s)if(sample_low[s])assert(sample_a[s]==address()&&sample_d[s]==data());}
+static void store(unsigned port,bool set,uint32_t value){
+ check_stable();unsigned old_s[4];for(unsigned s=0;s<4;++s)old_s[s]=s_state(s);
+ bool old_ce=ce;
+ uint16_t *p=port==0?&pa:port==1?&pb:port==2?&pc:&ph;
+ if(set)*p|=value;else *p&=~value;
+ tick+=2;ce=(pb>>15)&1U;
+ assert(pa&0x8000); // unrelated PA15 must survive every data update
+ if(ce!=old_ce){++ce_edges;power_events.push_back(ce?3:4);if(ce){assert(vl&&vp);for(unsigned s=0;s<4;++s)assert(s_state(s));}else for(unsigned s=0;s<4;++s)sample_low[s]=false;}
+ for(unsigned s=0;s<4;++s){
+  if(!ce)continue;
+  unsigned now=s_state(s);
+  if(old_s[s]&&!now){assert(!sample_low[s]);sample_low[s]=true;sample_a[s]=address();sample_d[s]=data();sample_t[s]=tick;if(address())assert(irq==1);}
+  if(!old_s[s]&&now&&sample_low[s]){assert(tick-sample_t[s]>=80);assert(address()==sample_a[s]&&data()==sample_d[s]);sample_low[s]=false;trace.push_back({address(),data(),s,sample_t[s]});}
  }
+ check_stable();
 }
-static void ce_low(void){ce=0;}
-static void ce_high(void){
- assert(!ce&&irq==1);
- for(unsigned sec=0;sec<4;sec++)assert(!latches[sec]);
- ce=1;++highs;check_active();
-}
-#define CE_LOW() ce_low()
-#define CE_HIGH() ce_high()
-static void fast_data(uint8_t d){assert(!(d&0xC0));data=d;check_active();}
-static void fast_address(unsigned a){assert(!ce&&a<25);for(unsigned i=0;i<4;i++)assert(!latches[i]);address=a;}
-#define FAST_SET_DATA(d) fast_data(d)
-static void host_apply_data(void){static const unsigned pin[6]={0,2,1,10,8,3};unsigned value=0;for(unsigned i=0;i<6;++i)value|=((physical_pins>>pin[i])&1U)<<i;assert(physical_pins&0x8000U);fast_data(value);}
-static void host_clear_data(uint32_t bits){assert(!(bits&~DATA_PORTA_MASK));physical_pins&=~bits;host_apply_data();}
-static void host_set_data(uint32_t bits){assert(!(bits&~DATA_PORTA_MASK));physical_pins|=bits;host_apply_data();}
-#define FAST_SET_ADDRESS(a) fast_address(a)
-static void strobe(unsigned sec,unsigned high){
- if(!high){assert(!low[sec]);low[sec]=1;saw_sample[sec]=0;}
- else {assert(low[sec]&&saw_sample[sec]);low[sec]=0;latches[sec]=data;if(!ce&&!data)++zero_latches;check_active();}
-}
-#define S1_LOW() strobe(0,0)
-#define S1_HIGH() strobe(0,1)
-#define S2_LOW() strobe(1,0)
-#define S2_HIGH() strobe(1,1)
-#define S3_LOW() strobe(2,0)
-#define S3_HIGH() strobe(2,1)
-#define S4_LOW() strobe(3,0)
-#define S4_HIGH() strobe(3,1)
-static void delay_100ns(void){check_active();}
-static void delay_40ns(void){check_active();}
-static void delay_ts_400ns(void){for(unsigned i=0;i<4;i++)if(low[i])saw_sample[i]=1;check_active();}
-static void delay_600ns(void){assert(!ce);}
-static void delay_10us(void){assert(!ce);}
-static unsigned __get_PRIMASK(void){return irq;}
-static void __disable_irq(void){irq=1;}
-static void __DMB(void){}
-static void __DSB(void){}
-static void __set_PRIMASK(unsigned saved){assert(!ce);irq=saved;++restores;}
+struct Register {unsigned port;bool set;void operator=(uint32_t value){store(port,set,value);}};
+struct Gpio {Register PORRA{0,false},POSRA{0,true},PORRB{1,false},POSRB{1,true},PORRC{2,false},POSRC{2,true},PORRH{3,false},POSRH{3,true};};
+static Gpio gpio;
+#define CM_GPIO (&gpio)
+struct Counter {operator uint32_t() const {if(!clock_frozen)++tick;return tick;}};
+struct Dwt {uint32_t CTRL=0;Counter CYCCNT;};static Dwt dwt;
+#define DWT (&dwt)
+struct Debug {uint32_t DEMCR=0;};static Debug debug;
+#define CoreDebug (&debug)
+#define CoreDebug_DEMCR_TRCENA_Msk 1U
+#define DWT_CTRL_CYCCNTENA_Msk 1U
+static void delay_ts_400ns(){tick+=80;check_stable();}
+static void delay_10us(){tick+=2000;}
+static uint32_t __get_PRIMASK(){return irq;}
+static void __disable_irq(){irq=1;}
+static void __set_PRIMASK(uint32_t saved){assert(!address()&&!data());for(unsigned s=0;s<4;++s)assert(!sample_low[s]&&s_state(s));irq=saved;++restores;}
+static void __DMB(){}
+static void __DSB(){}
+static void __ISB(){}
+static void GPIO_SetPins(unsigned port,unsigned pin){assert(port==1&&!ce);if(pin==6){vl=true;power_events.push_back(1);}else{assert(pin==5&&vl);vp=true;power_events.push_back(2);}}
+static void GPIO_ResetPins(unsigned port,unsigned pin){assert(port==1&&!ce);if(pin==5){if(vp)power_events.push_back(5);vp=false;}else{assert(pin==6&&!vp);if(vl)power_events.push_back(6);vl=false;}}
+LUT
 LOOKUP
-static void TPH_Build_Fast_LUT(void){if(!s_bLutInitialized)++builds;TPH_Build_Fast_LUT_actual();}
-static void TPH_Clear_Address(void){assert(!ce);for(unsigned i=0;i<4;i++)assert(!latches[i]);address=-1;}
-static void GPIO_SetPins(unsigned port,unsigned pin){
- assert(port==1&&!ce);
- if(pin==6)vl=1;else{assert(pin==5&&vl);for(unsigned i=0;i<4;i++)assert(!latches[i]);vp=1;}
+MACROS
+CORE
+static void run(const std::array<uint8_t,100>& column,unsigned saved){
+ std::array<uint8_t,100> original=column;
+ unsigned edges=ce_edges,old_restores=restores;trace.clear();irq=saved;
+ TPH_FireOneColumn(column.data());
+ assert(original==column&&ce&&vl&&vp&&!address()&&!data()&&irq==saved);
+ assert(ce_edges==edges&&restores==old_restores+1);
+ std::vector<Sample> live;
+ for(auto sample:trace)if(sample.a)live.push_back(sample);
+ assert(live.size()==26*4);
+ for(unsigned add=0;add<26;++add)for(unsigned sec=0;sec<4;++sec){
+  auto sample=live[add*4+sec];assert(sample.a==s_u8AddrLut[add<25?add:24]&&sample.s==sec);
+  assert(sample.d==(add<25?(column[add*4+sec]&63U):0));
+ }
+ // Stop group is part of the same loop; each matching-section period follows
+ // the same instruction trace even at Add25 -> stop (same physical address).
+ for(unsigned sec=0;sec<4;++sec){auto period=live[4+sec].time-live[sec].time;for(unsigned add=1;add<25;++add)assert(live[(add+1)*4+sec].time-live[add*4+sec].time==period);}
+ for(unsigned s=0;s<4;++s)assert(!sample_low[s]&&s_state(s));
+ assert(trace.size()==26*4+4); // final Ax=0 reset, CE still HIGH
 }
-static void GPIO_ResetPins(unsigned port,unsigned pin){
- assert(port==1&&!ce);for(unsigned i=0;i<4;i++)assert(!latches[i]);
- if(pin==5)vp=0;else{assert(pin==6&&!vp);vl=0;}
+int main(){
+ std::array<uint8_t,100> c{};
+ TPH_FireOneColumn(c.data());assert(trace.empty()&&!ce);
+ TPH_M0333N_Power(ENABLE);assert(ce&&vl&&vp);
+ assert((power_events==std::vector<unsigned>{1,2,3}));
+ unsigned e=ce_edges;TPH_M0333N_Power(ENABLE);assert(ce_edges==e);
+ for(unsigned bit=0;bit<6;++bit){c.fill(1U<<bit);run(c,bit&1U);}
+ c.fill(0);run(c,0);c[99]=63;run(c,1);
+ for(unsigned i=0;i<100;++i)c[i]=(i*37U+11U)&63U;run(c,0);
+ uint32_t last=tick;run(c,0);assert(tick-last>=12000U); // conservative idle gap
+ auto n=trace.size();e=ce_edges;TPH_FireOneColumn(nullptr);assert(trace.size()==n&&ce_edges==e&&ce);
+ // unsigned counter wrap is valid for the short idle gap
+ tick=0xfffffff0U;s_u32StopCycle=tick;run(c,1);
+ TPH_M0333N_Power(0);assert(!ce&&!vp&&!vl&&irq==1);
+ assert((power_events==std::vector<unsigned>{1,2,3,4,5,6}));
+ for(unsigned s=0;s<4;++s)assert(!s_state(s));
+ n=trace.size();TPH_FireOneColumn(c.data());assert(trace.size()==n);
+ clock_frozen=true;TPH_M0333N_Power(ENABLE);assert(!s_bHeadPowered&&!ce&&!vl&&!vp);
+ puts("PASS: actual LUT/GPIO mapping, 25+1 cadence, continuous CE, zero stop, idle reset, power order, IRQ restore, idle gap/wrap, NULL/OFF and clock failure");
 }
-CLEAR
-POWER
-COLUMN
-static void run(unsigned saved){
- memset(observed,0,100);highs=restores=zero_latches=0;irq=saved;
- memset(latches,0x3F,4); /* emulate retained/undefined previous data */
- uint8_t original[100];memcpy(original,expected,100);
- TPH_FireOneColumn(expected);assert(!memcmp(original,expected,100));
- assert(highs==25&&restores==25&&irq==saved&&!ce&&address==-1);
- assert(!memcmp(observed,expected,100));
- for(unsigned i=0;i<4;i++)assert(!latches[i]&&!low[i]);
- assert(zero_latches>=26*4);
-}
-int main(void){
- expected[73]=2;expected[46]=8;expected[15]=32;expected[99]=1;
- run(0);run(1);assert(builds==1);
- for(unsigned bit=0;bit<6;++bit){memset(expected,0,100);for(unsigned i=0;i<100;++i)expected[i]=1U<<bit;run(bit&1U);}
- for(unsigned i=0;i<100;++i){expected[i]=(uint8_t)(i%64U);}
- run(0);
- memset(expected,0,100);run(0);
- memset(latches,0x3F,4);TPH_FireOneColumn(NULL);assert(!ce&&address==-1&&irq==0);
- memset(latches,0x3F,4);TPH_M0333N_Power(ENABLE);assert(vl&&vp&&!ce);
- memset(latches,0x3F,4);TPH_M0333N_Power(0);assert(!vl&&!vp&&!ce);
- puts("PASS: no retained bits at CE/address enable, actual 100-byte mapping, zero/NULL cleanup, IRQ mask restoration, power ordering");
-}
-'''.replace('LOOKUP',lookup).replace('CLEAR',clear).replace('POWER',power).replace('COLUMN',column)
+'''
+h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('CORE\n',core+'\n')
 with tempfile.TemporaryDirectory() as tmp:
- p=Path(tmp);(p/'test.c').write_text(h)
- subprocess.run(['cc','-std=c99','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Werror',str(p/'test.c'),'-o',str(p/'test')],check=True)
+ p=Path(tmp);(p/'test.cpp').write_text(h)
+ subprocess.run(['c++','-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
