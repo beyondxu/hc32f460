@@ -2,11 +2,9 @@
 #define __TPH_DRIVER_H__
 
 #include "hc32_ll.h"
+#include "tph_geometry.h"
 
 /* M0333N 喷头参数定义 (600喷嘴 = 25组物理地址 * 4个分段(Section) * 6个数据域(Domain)) */
-#define TPH_ADDR_NUM            (25U)
-#define TPH_SECTION_NUM         (4U)
-#define TPH_COLUMN_BYTES        (TPH_ADDR_NUM * TPH_SECTION_NUM) // 每列点阵 100 字节
 
 /* 硬件端口与引脚定义 (严格对应 MCU2.SchDoc) */
 // 1. 电源使能

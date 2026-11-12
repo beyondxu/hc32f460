@@ -24,6 +24,7 @@
 #define __TPH_M0333N_H__
 
 #include "hc32_ll.h"
+#include "tph_geometry.h"
 #include <string.h>
 
 /* ========================================================================== */
@@ -82,7 +83,6 @@
 #define PIN_D6_PIN              (GPIO_PIN_03)   // PA3
 
 /* 单列点阵字节数：25 地址 * 4 分区 = 100 字节 */
-#define TPH_COLUMN_BYTES        (100U)
 
 /* 测试颜色通道选择枚举 */
 typedef enum {

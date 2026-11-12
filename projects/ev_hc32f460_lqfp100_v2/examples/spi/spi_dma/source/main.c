@@ -11,7 +11,6 @@
 #define EXAMPLE_PERIPH_WP       (LL_PERIPH_EFM | LL_PERIPH_FCG | LL_PERIPH_SRAM)
 
 /* ★ 关键对齐：单列标准 100 字节 ★ */
-#define TPH_COLUMN_BYTES        (100U)
 
 /* ================= 1. J4 调试串口 ================= */
 #define J4_UART_UNIT            (CM_USART2)
