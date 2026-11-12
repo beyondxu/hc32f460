@@ -1,3 +1,5 @@
+> 本分支为固定S2的额外1ms对照，HC默认1000us。请先读 [FIXED_S2_COOLDOWN_TEST.md](FIXED_S2_COOLDOWN_TEST.md)；以下保留无额外等待基线记录。
+
 # 固定S2基线：不加1ms，固定A/S/D与每喷嘴指令次数
 
 ## 目的与限度
