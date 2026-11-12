@@ -10,6 +10,8 @@ assert src.index('__disable_irq();',src.index('void TPH_FireOneColumn('))<src.in
 column=core[core.index('void TPH_FireOneColumn('):]
 body=column[column.index('do {'):column.index('} while (group != end);')]
 assert 'groups[26]' in column and 'groups + 26U' in column
+assert 'uint16_t address;' in column and 'uint16_t data[4];' in column
+assert '"+r"' not in body and 'This is a compiler barrier' in body
 assert 'add < 25U ? add : 24U' in column
 assert 'pColumn100B[add * 4U + sec] & 0x3FU' in column
 assert body.count('delay_ts_400ns();')==4
@@ -43,6 +45,15 @@ if arm.exists():
     assert not re.search(r'\t(?:bl|blx)(?:\.|\s)',live),live
     group_asm=re.split(r'\tbne(?:\.[a-z]+)?\s',live,maxsplit=1)[0]
     assert len(re.findall(r'\tstrh(?:\.[a-z]+)?\s',group_asm))==13,(opt,pad,group_asm)
+    # Inspect the actual back-edge target, excluding one-time setup.
+    branch=re.search(r'\tbne(?:\.[a-z]+)?\s+([0-9a-f]+)\s',live)
+    assert branch,(opt,pad,live)
+    target=int(branch.group(1),16)
+    loop_start=re.search(r'(?m)^\s*'+format(target,'x')+r':',live)
+    assert loop_start,(opt,pad,live)
+    repeat=live[loop_start.start():branch.end()]
+    assert len(re.findall(r'\tldrh(?:\.[a-z]+)?\s',repeat))==5,(opt,pad,repeat)
+    assert not re.search(r'\t(?:uxth|mov|movs|ldr|ldrd)(?:\.[a-z]+)?\s',repeat),(opt,pad,repeat)
     actual_nops=len(re.findall(r'\bnop\b',live))
     runs=[];run=0
     for line in live.splitlines():
@@ -57,6 +68,6 @@ if arm.exists():
    assert windows,(opt,'missing actual live window')
    stack=(t/(opt+str(pad)+'.su')).read_text()
    sizes=[int(line.split('\t')[1]) for line in stack.splitlines() if 'TPH_FireOneColumn' in line]
-   print(opt,'pad=',pad,'live=',','.join(windows),'stack_bytes=',sizes)
- print('PASS: M4 -O2/-Os at pads 0/4/8/12/16; no warnings or calls in live train, sample NOP blocks unchanged')
+   print(opt,'pad=',pad,'live=',','.join(windows),'stack_bytes=',sizes,'repeat_halfword_loads=5 redundant_moves_truncations=0')
+ print('PASS: M4 -O2/-Os at pads 0/4/8/12/16; no warnings or calls in live train, sample NOP blocks unchanged; five halfword preloads, no repeated moves/truncations')
 print('PASS: complete delivery matches production; 25+zero stop share live path, five A/D output writes per group, no CE switching/source LUTs/timers; only optional calibrated group padding')

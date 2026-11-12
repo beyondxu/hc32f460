@@ -105,7 +105,8 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
     }
 }
 
-/* TPH_DIRECT_PORT_v1: fewer GPIO writes; S sampling helpers are unchanged.
+/* TPH_DIRECT_PORT_v2: halfword preparation and input-only preload barrier.
+ * Removes redundant moves/truncations; S sampling helpers are unchanged.
  * Requires the continuous-CE power/stop protocol, never the old pulsed-CE one.
  * Re-measure all S widths and matching-S address periods after the local build.
  * No claim of 1.70 us is made by this source code.
@@ -121,8 +122,8 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     if (!s_bHeadPowered || pColumn100B == NULL) return;
 
     struct tph_group {
-        uint32_t address;
-        uint32_t data[4];
+        uint16_t address;
+        uint16_t data[4];
     } groups[26];
     /* Decode while no nozzle is active. Entry 26 stops Add25 with zero data. */
     for (unsigned add = 0; add < 26U; ++add) {
@@ -156,13 +157,18 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     const struct tph_group *group = groups;
     const struct tph_group *end = groups + 26U;
     do {
-        uint32_t address = group->address;
-        uint32_t w0 = group->data[0];
-        uint32_t w1 = group->data[1];
-        uint32_t w2 = group->data[2];
-        uint32_t w3 = group->data[3];
-        __asm volatile ("" : "+r" (address), "+r" (w0), "+r" (w1),
-                              "+r" (w2), "+r" (w3) : : "memory");
+        uint16_t address = group->address;
+        uint16_t w0 = group->data[0];
+        uint16_t w1 = group->data[1];
+        uint16_t w2 = group->data[2];
+        uint16_t w3 = group->data[3];
+        /* Read all five halfwords before any live GPIO update. Input-only
+         * operands preserve their known 16-bit range: read/write operands
+         * made GCC emit extra moves and UXTHs between sampling edges.
+         * This is a compiler barrier, not a delay or an S-width guarantee.
+         */
+        __asm volatile ("" : : "r" (address), "r" (w0), "r" (w1),
+                                "r" (w2), "r" (w3) : "memory");
         CM_GPIO->PODRB = (uint16_t)address;
 
         CM_GPIO->PODRA = (uint16_t)w0;
