@@ -1,3 +1,5 @@
+> 当前分支用于固定S2六条分色检查，HC额外等待为0。先读 [FIXED_S2_COLOR_CHECK_TEST.md](FIXED_S2_COLOR_CHECK_TEST.md)；以下为混色/间隔历史记录。
+
 # 固定S2、额外1ms间隔：与996/997/998基线比较
 
 ## 已完成的无额外等待基线
