@@ -30,9 +30,9 @@ if arm.exists():
  nop_count=len(re.findall(r'\bnop\b',sample))
  with tempfile.TemporaryDirectory() as tmp:
   t=Path(tmp)
-  for opt,pad in [(o,p) for o in ['-O2','-Os'] for p in [0,4,8,12,16]]:
-   o=t/(opt+str(pad)+'.o')
-   r=subprocess.run([str(arm),'-mcpu=cortex-m4','-mthumb','-mfpu=fpv4-sp-d16','-mfloat-abi=hard','-DHC32F460','-DUSE_DDL_DRIVER',opt,'-Wall','-Wextra','-Werror','-fstack-usage','-DTPH_DIRECT_PORT_PAD_NOPS='+str(pad),*['-I'+str(i) for i in incs],'-c',str(S/'tph_m0333n.c'),'-o',str(o)],capture_output=True)
+  for opt,pad,cooldown in [(o,p,c) for o in ['-O2','-Os'] for p in [0,4,8,12,16] for c in [0,1000]]:
+   o=t/(opt+str(pad)+'-'+str(cooldown)+'.o')
+   r=subprocess.run([str(arm),'-mcpu=cortex-m4','-mthumb','-mfpu=fpv4-sp-d16','-mfloat-abi=hard','-DHC32F460','-DUSE_DDL_DRIVER',opt,'-Wall','-Wextra','-Werror','-fstack-usage','-DTPH_DIRECT_PORT_PAD_NOPS='+str(pad),'-DTPH_COLUMN_COOLDOWN_US='+str(cooldown),*['-I'+str(i) for i in incs],'-c',str(S/'tph_m0333n.c'),'-o',str(o)],capture_output=True)
    assert r.returncode==0,r.stderr.decode('utf-8',errors='replace')
    asm=subprocess.check_output([str(objdump),'-d',str(o)],text=True)
    chunks=re.split(r'\n[0-9a-f]+ <([^>]+)>:\n',asm)
@@ -66,8 +66,8 @@ if arm.exists():
     assert 0<=actual_nops-(8*nop_count+pad)<=3,(opt,pad,actual_nops,runs)
     windows.append(name)
    assert windows,(opt,'missing actual live window')
-   stack=(t/(opt+str(pad)+'.su')).read_text()
+   stack=(t/(opt+str(pad)+'-'+str(cooldown)+'.su')).read_text()
    sizes=[int(line.split('\t')[1]) for line in stack.splitlines() if 'TPH_FireOneColumn' in line]
-   print(opt,'pad=',pad,'live=',','.join(windows),'stack_bytes=',sizes,'repeat_halfword_loads=5 redundant_moves_truncations=0')
- print('PASS: M4 -O2/-Os at pads 0/4/8/12/16; no warnings or calls in live train, sample NOP blocks unchanged; five halfword preloads, no repeated moves/truncations')
+   print(opt,'cooldown_us=',cooldown,'pad=',pad,'live=',','.join(windows),'stack_bytes=',sizes,'repeat_halfword_loads=5 redundant_moves_truncations=0')
+ print('PASS: M4 -O2/-Os at pads 0/4/8/12/16 and cooldown 0/1000us; no warnings or calls in live train, sample NOP blocks unchanged; five halfword preloads, no repeated moves/truncations')
 print('PASS: complete delivery matches production; 25+zero stop share live path, five A/D output writes per group, no CE switching/source LUTs/timers; only optional calibrated group padding')

@@ -98,4 +98,5 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     s_bHaveStopTime = true;
     __DSB();
     __set_PRIMASK(saved_primask);
+    TPH_Column_Cooldown();
 }

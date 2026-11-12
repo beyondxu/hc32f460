@@ -11,6 +11,8 @@ a=src.index('void TPH_Build_Fast_LUT(void)');b=src.index('/* TPH_CONTINUOUS_CE_v
 lookup=src[a:b]
 core=(S/'tph_continuous_ce.inc').read_text()
 assert core in src
+column=core[core.index('void TPH_FireOneColumn('):]
+assert column.index('__set_PRIMASK(saved_primask);') < column.index('TPH_Column_Cooldown();')
 macros='\n'.join(re.findall(r'^#define (?:S[1-4]_(?:LOW|HIGH)|CE_(?:LOW|HIGH))\(\).*$',src,re.M))
 h=r'''
 #include <cassert>
@@ -32,6 +34,8 @@ static uint16_t s_AddrPortB_Set[25],s_AddrPortB_Clr[25],s_DataPortA_Set[64],s_Da
 static uint32_t SystemCoreClock=200000000;
 static uint32_t tick,irq;
 static bool clock_frozen,vl,vp,ce;
+static bool restored_idle;
+static unsigned restored_irq;
 static uint16_t pa=0x8000,pb=0x0008,pc,ph;
 static bool checking_ports;
 static uint16_t expected_a_other,expected_b_other;
@@ -80,7 +84,7 @@ struct Register {
 struct Gpio {Register PORRA{0,0},POSRA{0,1},PORRB{1,0},POSRB{1,1},PORRC{2,0},POSRC{2,1},PORRH{3,0},POSRH{3,1},PODRA{0,2},PODRB{1,2};};
 static Gpio gpio;
 #define CM_GPIO (&gpio)
-struct Counter {operator uint32_t() const {if(!clock_frozen)++tick;return tick;}};
+struct Counter {operator uint32_t() const {if(restored_idle&&ce){assert(irq==restored_irq&&!address()&&!data());for(unsigned s=0;s<4;++s)assert(s_state(s));}if(!clock_frozen)++tick;return tick;}};
 struct Dwt {uint32_t CTRL=0;Counter CYCCNT;};static Dwt dwt;
 #define DWT (&dwt)
 struct Debug {uint32_t DEMCR=0;};static Debug debug;
@@ -90,8 +94,8 @@ struct Debug {uint32_t DEMCR=0;};static Debug debug;
 static void delay_ts_400ns(){tick+=80;check_stable();}
 static void delay_10us(){tick+=2000;}
 static uint32_t __get_PRIMASK(){return irq;}
-static void __disable_irq(){irq=1;}
-static void __set_PRIMASK(uint32_t saved){assert(!address()&&!data());for(unsigned s=0;s<4;++s)assert(!sample_low[s]&&s_state(s));irq=saved;++restores;}
+static void __disable_irq(){restored_idle=false;irq=1;}
+static void __set_PRIMASK(uint32_t saved){assert(!address()&&!data());for(unsigned s=0;s<4;++s)assert(!sample_low[s]&&s_state(s));irq=saved;restored_irq=saved;restored_idle=true;++restores;}
 static void __DMB(){}
 static void __DSB(){}
 static void __ISB(){}
@@ -103,7 +107,8 @@ MACROS
 CORE
 static void run(const std::array<uint8_t,100>& column,unsigned saved){
  std::array<uint8_t,100> original=column;
- unsigned edges=ce_edges,old_restores=restores;trace.clear();irq=saved;
+ unsigned edges=ce_edges,old_restores=restores;trace.clear();irq=saved;restored_idle=false;
+ unsigned cooldown_before=s_u32CooldownColumns;
  // Exercise unrelated GPIO states, including head power enables and CE.
  pa^=0x0010U;pb^=0x0080U;
  expected_a_other=pa&(uint16_t)~DATA_PORTA_MASK;
@@ -113,6 +118,14 @@ static void run(const std::array<uint8_t,100>& column,unsigned saved){
  checking_ports=false;
  assert(original==column&&ce&&vl&&vp&&!address()&&!data()&&irq==saved);
  assert(ce_edges==edges&&restores==old_restores+1);
+#if TPH_COLUMN_COOLDOWN_US > 0
+ assert(s_u32CooldownColumns==cooldown_before+1);
+ assert(s_u32CooldownMin>=s_u32CooldownCycles);
+ assert(s_u32CooldownMax>=s_u32CooldownMin);
+ assert((uint32_t)(tick-s_u32StopCycle)>=s_u32CooldownCycles);
+#else
+ assert(!s_u32CooldownColumns&&!cooldown_before);
+#endif
  std::vector<Sample> live;
  for(auto sample:trace)if(sample.a)live.push_back(sample);
  assert(live.size()==26*4);
@@ -136,7 +149,15 @@ int main(){
  c.fill(0);run(c,0);c[99]=63;run(c,1);
  for(unsigned i=0;i<100;++i)c[i]=(i*37U+11U)&63U;run(c,0);
  uint32_t last=tick;run(c,0);assert(tick-last>=12000U); // conservative idle gap
- auto n=trace.size();e=ce_edges;TPH_FireOneColumn(nullptr);assert(trace.size()==n&&ce_edges==e&&ce);
+ auto n=trace.size();e=ce_edges;unsigned calls=s_u32CooldownColumns;
+ TPH_FireOneColumn(nullptr);assert(trace.size()==n&&ce_edges==e&&ce&&s_u32CooldownColumns==calls);
+#if TPH_COLUMN_COOLDOWN_US > 0
+ // Force the extra wait itself (not just the preceding idle guard) to wrap.
+ tick=0xfffffff0U;uint32_t wait_begin=tick;
+ TPH_Column_Cooldown();
+ assert((uint32_t)(tick-wait_begin)>=s_u32CooldownCycles);
+ assert(s_u32CooldownColumns==calls+1&&trace.size()==n&&ce_edges==e);
+#endif
  // unsigned counter wrap is valid for the short idle gap
  tick=0xfffffff0U;s_u32StopCycle=tick;run(c,1);
  TPH_M0333N_Power(0);assert(!ce&&!vp&&!vl&&irq==1);
@@ -150,5 +171,6 @@ int main(){
 h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('CORE\n',core+'\n')
 with tempfile.TemporaryDirectory() as tmp:
  p=Path(tmp);(p/'test.cpp').write_text(h)
- subprocess.run(['c++','-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
- subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
+ for cooldown in [0,1000]:
+  subprocess.run(['c++','-I'+str(S),'-DTPH_COLUMN_COOLDOWN_US='+str(cooldown),'-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+  subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})

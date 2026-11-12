@@ -3,6 +3,9 @@
  * CE width is NOT tFire. Measure matching S falling edges in adjacent groups.
  * This code does not claim a calibrated 1.70 us address period.
  */
+#include "tph_column_cooldown.h"
+static uint32_t s_u32CooldownCycles, s_u32CooldownColumns;
+static uint32_t s_u32CooldownMin, s_u32CooldownMax;
 static bool s_bHeadPowered = false;
 static bool s_bHaveStopTime = false;
 static uint32_t s_u32StopCycle;
@@ -50,10 +53,30 @@ static bool TPH_Start_Idle_Clock(void) {
              */
             s_u32IdleCycles = (uint32_t)(((uint64_t)SystemCoreClock * 60U
                                          + 999999U) / 1000000U);
+            s_u32CooldownCycles = (uint32_t)(((uint64_t)SystemCoreClock
+                * TPH_COLUMN_COOLDOWN_US + 999999U) / 1000000U);
             return true;
         }
     }
     return false;
+}
+
+/* The zero stop/reset and caller IRQ mask are restored before this wait.
+ * Extra idle is spent here before the HC32 main loop rearms SPI/READY, so
+ * communication or motor waits cannot hide/absorb the added delay.
+ * The previous 60 us minimum gap remains independent and unchanged.
+ */
+static void TPH_Column_Cooldown(void) {
+#if TPH_COLUMN_COOLDOWN_US > 0
+    uint32_t begin = DWT->CYCCNT;
+    uint32_t elapsed;
+    do {
+        elapsed = (uint32_t)(DWT->CYCCNT - begin);
+    } while (elapsed < s_u32CooldownCycles);
+    if (elapsed < s_u32CooldownMin) s_u32CooldownMin = elapsed;
+    if (elapsed > s_u32CooldownMax) s_u32CooldownMax = elapsed;
+    ++s_u32CooldownColumns;
+#endif
 }
 
 void TPH_M0333N_Power(en_functional_state_t enState) {
@@ -79,8 +102,13 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
         CE_HIGH();
         TPH_Reset_Idle_CE_High();
         s_bHaveStopTime = false;
+        s_u32CooldownColumns = 0;
+        s_u32CooldownMin = UINT32_MAX;
+        s_u32CooldownMax = 0;
         s_bHeadPowered = true;
         printf("[TPH Power] CONT_CE_v1 ON CE=HIGH idle=Ax0_Dx0; rails unmeasured\r\n");
+        printf("[TPH COOLDOWN] v1 extra_idle_us=%lu after_zero_reset before_READY no_extra_fires\r\n",
+               (unsigned long)TPH_COLUMN_COOLDOWN_US);
     } else {
         if (s_bHeadPowered) {
             /* The last column has already received its Add25 zero stop.
@@ -99,6 +127,13 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
         GPIO_ResetPins(PIN_TPH_EN_PORT, PIN_TPH_EN_PIN);
         delay_10us(); /* VP OFF -> VL OFF: tpf >= 5 us */
         GPIO_ResetPins(PIN_VL_EN_PORT, PIN_VL_EN_PIN);
+        if (s_bHeadPowered) {
+            printf("[TPH COOLDOWN_END] extra_idle_us=%lu columns=%lu min_wait_cycles=%lu max_wait_cycles=%lu core_hz=%lu\r\n",
+                   (unsigned long)TPH_COLUMN_COOLDOWN_US,
+                   (unsigned long)s_u32CooldownColumns,
+                   (unsigned long)(s_u32CooldownColumns ? s_u32CooldownMin : 0U),
+                   (unsigned long)s_u32CooldownMax, (unsigned long)SystemCoreClock);
+        }
         s_bHeadPowered = false;
         s_bHaveStopTime = false;
         printf("[TPH Power] CONT_CE_v1 OFF CE=LOW\r\n");
@@ -205,4 +240,5 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     s_bHaveStopTime = true;
     __DSB();
     __set_PRIMASK(saved_primask);
+    TPH_Column_Cooldown();
 }
