@@ -20,7 +20,11 @@ git merge --autostash --no-edit origin/codex/printer-column-cooldown
 git log -3 --oneline
 ```
 
-出现冲突先停止，不强制覆盖或清掉本地修改。完整代码已在source/tph_m0333n.c中，无需复制C代码、增加Keil编译单元或修改BK。新增头文件source/tph_column_cooldown.h会被现有驱动直接包含。
+出现冲突先停止，不强制覆盖或清掉本地修改。如果已经出现日志中的特定情况：更新到ccbad8c成功、恢复autostash时仅tph_m0333n.c冲突，可使用仓库根目录tools/Resolve-TphCooldownAutostash.ps1。脚本严格核对冲突两侧分别为fe9de20旧实现与ccbad8c冷却实现；只接受已审阅的一个冲突块，其他情况拒绝修改。先在Git目录下备份完整原文件，再保留新版块；冲突外的共享采样函数与GBK字节不动，打印保留的NOP数量，只对这个驱动文件执行git add。它不提交、不清理其他文件、不删除或弹出stash。完成后再执行本节的git merge以合入后续宏定义修复。
+
+Git拉取本身可在冲突状态执行。可先git fetch origin，然后从远端分支取脚本到TEMP运行；无需切换分支或手工复制C代码。工具针对Windows PowerShell 5.1语法编写。实际CRLF换行与44-NOP校准造成的autostash冲突已在临时Git仓库复现，并核对修复规则保留校准、成功继续更新；尚未在用户Windows环境执行。
+
+完整代码已在source/tph_m0333n.c中，无需复制C代码、增加Keil编译单元或修改BK。新增头文件source/tph_column_cooldown.h会被现有驱动直接包含。
 
 本提交基于fe9de20，仅改冷却控制和配套统计；共享delay_*函数逐字节不改。Git合并保留不冲突的已提交校准，--autostash暂存并恢复未提交跟踪文件修改。仓库默认采样函数仍是此前版本，直接换成没有本地校准的新目录不能保证得到1.3us。更新后保留你已测过的本地44个NOP版本，Rebuild All、下载HC32并整机重启，再核实列内tFire仍约1.3us、各S宽度未因本地合并或编译布局发生明显变化。如果回到1.77us，先处理校准差异，不把结果作为同波形的间隔对照。
 
