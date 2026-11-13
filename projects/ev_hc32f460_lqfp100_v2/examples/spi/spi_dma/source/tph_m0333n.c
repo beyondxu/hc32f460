@@ -139,6 +139,8 @@ static __attribute__((always_inline)) inline void delay_10us(void) {
 /* ========================================================================== */
 /* ★ 2. S 与 CE 单周期寄存器直写宏 (耗时仅 5ns)                             ★ */
 /* ========================================================================== */
+/* Select the sampling check only after local helper definitions. */
+#include "tph_sampling_check.h"
 #define S1_LOW()    (CM_GPIO->PORRC = (1U << 15))
 #define S1_HIGH()   (CM_GPIO->POSRC = (1U << 15))
 

@@ -11,6 +11,10 @@ a=src.index('void TPH_Build_Fast_LUT(void)');b=src.index('/* TPH_CONTINUOUS_CE_v
 lookup=src[a:b]
 core=(S/'tph_continuous_ce.inc').read_text()
 assert core in src
+check_header=(S/'tph_sampling_check.h').read_text()
+check_header,n=re.subn(r'__asm volatile\s*\([\s\S]*?\);','++check_samples;tick+=80;check_stable();',check_header,count=1)
+assert n==1
+assert src.index('#include \"tph_sampling_check.h\"') > src.index('inline void delay_10us')
 column=core[core.index('void TPH_FireOneColumn('):]
 assert column.index('__set_PRIMASK(saved_primask);') < column.index('TPH_Column_Cooldown();')
 macros='\n'.join(re.findall(r'^#define (?:S[1-4]_(?:LOW|HIGH)|CE_(?:LOW|HIGH))\(\).*$',src,re.M))
@@ -34,6 +38,7 @@ static uint16_t s_AddrPortB_Set[25],s_AddrPortB_Clr[25],s_DataPortA_Set[64],s_Da
 static uint32_t SystemCoreClock=200000000;
 static uint32_t tick,irq;
 static bool clock_frozen,vl,vp,ce;
+static unsigned legacy_samples,check_samples;
 static bool restored_idle;
 static unsigned restored_irq;
 static uint16_t pa=0x8000,pb=0x0008,pc,ph;
@@ -91,7 +96,7 @@ struct Debug {uint32_t DEMCR=0;};static Debug debug;
 #define CoreDebug (&debug)
 #define CoreDebug_DEMCR_TRCENA_Msk 1U
 #define DWT_CTRL_CYCCNTENA_Msk 1U
-static void delay_ts_400ns(){tick+=80;check_stable();}
+static inline void delay_ts_400ns(){++legacy_samples;tick+=80;check_stable();}
 static void delay_10us(){tick+=2000;}
 static uint32_t __get_PRIMASK(){return irq;}
 static void __disable_irq(){restored_idle=false;irq=1;}
@@ -104,11 +109,13 @@ static void GPIO_ResetPins(unsigned port,unsigned pin){assert(port==1&&!ce);stor
 LUT
 LOOKUP
 MACROS
+SAMPLE_CHECK_HEADER
 CORE
 static void run(const std::array<uint8_t,100>& column,unsigned saved){
  std::array<uint8_t,100> original=column;
  unsigned edges=ce_edges,old_restores=restores;trace.clear();irq=saved;restored_idle=false;
  unsigned cooldown_before=s_u32CooldownColumns;
+ unsigned old_legacy=legacy_samples,old_check=check_samples;
  // Exercise unrelated GPIO states, including head power enables and CE.
  pa^=0x0010U;pb^=0x0080U;
  expected_a_other=pa&(uint16_t)~DATA_PORTA_MASK;
@@ -118,6 +125,11 @@ static void run(const std::array<uint8_t,100>& column,unsigned saved){
  checking_ports=false;
  assert(original==column&&ce&&vl&&vp&&!address()&&!data()&&irq==saved);
  assert(ce_edges==edges&&restores==old_restores+1);
+#if TPH_SAMPLING_CHECK_ENABLE
+ assert(check_samples-old_check==108&&legacy_samples==old_legacy);
+#else
+ assert(legacy_samples-old_legacy==108&&check_samples==old_check);
+#endif
 #if TPH_COLUMN_COOLDOWN_US > 0
  assert(s_u32CooldownColumns==cooldown_before+1);
  assert(s_u32CooldownMin>=s_u32CooldownCycles);
@@ -168,9 +180,9 @@ int main(){
  puts("PASS: actual LUT/GPIO mapping, 25+1 cadence, continuous CE, zero stop, idle reset, power order, IRQ restore, idle gap/wrap, NULL/OFF and clock failure");
 }
 '''
-h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('CORE\n',core+'\n')
+h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('SAMPLE_CHECK_HEADER\n',check_header+'\n').replace('CORE\n',core+'\n')
 with tempfile.TemporaryDirectory() as tmp:
  p=Path(tmp);(p/'test.cpp').write_text(h)
- for cooldown in [0,1000]:
-  subprocess.run(['c++','-I'+str(S),'-DTPH_COLUMN_COOLDOWN_US='+str(cooldown),'-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+ for cooldown,check in [(c,s) for c in [0,1000] for s in [0,1]]:
+  subprocess.run(['c++','-I'+str(S),'-DTPH_COLUMN_COOLDOWN_US='+str(cooldown),'-DTPH_SAMPLING_CHECK_ENABLE='+str(check),'-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
   subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})

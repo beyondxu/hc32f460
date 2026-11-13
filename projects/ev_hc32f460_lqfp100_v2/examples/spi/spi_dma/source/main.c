@@ -1,5 +1,6 @@
 #include "printer_row_audit.h"
 #include "printer_control.h"
+#include "tph_sampling_check.h"
 #include "main.h"
 #include "tph_driver.h"
 #include <stdio.h>
@@ -441,6 +442,8 @@ int32_t main(void) {
     (void)LL_PrintfInit(J4_UART_UNIT, 115200UL, J4_UART_PreInit);
     printf("\r\n==============================================\r\n");
     printf("   HC32F460 Coprocessor Firmware Starting...   \r\n");
+    printf("[HC32 SAMPLING] check_v1 mode=%s nops=%u measured_width_unverified\r\n",
+           TPH_SAMPLING_CHECK_MODE, TPH_SAMPLING_SELECTED_NOPS);
     printf("==============================================\r\n");
 
     // 3. 初始化握手 GPIO 与 SPI1 + DMA 从机
