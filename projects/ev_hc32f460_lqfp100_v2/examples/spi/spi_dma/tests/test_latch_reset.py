@@ -183,6 +183,6 @@ int main(){
 h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('SAMPLE_CHECK_HEADER\n',check_header+'\n').replace('CORE\n',core+'\n')
 with tempfile.TemporaryDirectory() as tmp:
  p=Path(tmp);(p/'test.cpp').write_text(h)
- for cooldown,check in [(c,s) for c in [0,1000] for s in [0,1]]:
-  subprocess.run(['c++','-I'+str(S),'-DTPH_COLUMN_COOLDOWN_US='+str(cooldown),'-DTPH_SAMPLING_CHECK_ENABLE='+str(check),'-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+ for cooldown,check,count in [(c,s,n) for c in [0,1000] for s,n in [(0,57),(1,57),(1,68)]]:
+  subprocess.run(['c++','-I'+str(S),'-DTPH_COLUMN_COOLDOWN_US='+str(cooldown),'-DTPH_SAMPLING_CHECK_ENABLE='+str(check),'-DTPH_SAMPLING_CHECK_NOPS='+str(count),'-std=c++17','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Wall','-Wextra','-Wno-misleading-indentation','-Werror',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
   subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})

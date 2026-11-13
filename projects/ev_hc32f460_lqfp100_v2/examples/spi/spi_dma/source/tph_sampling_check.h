@@ -11,9 +11,21 @@
 #if TPH_SAMPLING_CHECK_ENABLE != 0 && TPH_SAMPLING_CHECK_ENABLE != 1
 #error TPH_SAMPLING_CHECK_ENABLE must be 0 or 1
 #endif
+/* Candidate derived from local 68-NOP/445ns and reference 390ns readings.
+ * Eleven fewer NOPs estimate 55ns at 200MHz; hardware must confirm. */
+#ifndef TPH_SAMPLING_CHECK_NOPS
+#define TPH_SAMPLING_CHECK_NOPS 57U
+#endif
+#if TPH_SAMPLING_CHECK_NOPS != 57U && TPH_SAMPLING_CHECK_NOPS != 68U
+#error TPH_SAMPLING_CHECK_NOPS must be 57 or 68
+#endif
 #if TPH_SAMPLING_CHECK_ENABLE
+#if TPH_SAMPLING_CHECK_NOPS == 57U
+#define TPH_SAMPLING_CHECK_MODE "CHECK_57NOP"
+#else
 #define TPH_SAMPLING_CHECK_MODE "CHECK_68NOP"
-#define TPH_SAMPLING_SELECTED_NOPS 68U
+#endif
+#define TPH_SAMPLING_SELECTED_NOPS TPH_SAMPLING_CHECK_NOPS
 static __attribute__((always_inline)) inline void TPH_Check_Sample_Delay(void) {
     __asm volatile (
         "nop \n nop \n nop \n nop \n nop \n nop \n nop \n nop \n "
@@ -23,8 +35,11 @@ static __attribute__((always_inline)) inline void TPH_Check_Sample_Delay(void) {
         "nop \n nop \n nop \n nop \n nop \n nop \n nop \n nop \n "
         "nop \n nop \n nop \n nop \n nop \n nop \n nop \n nop \n "
         "nop \n nop \n nop \n nop \n nop \n nop \n nop \n nop \n "
+        "nop \n"
+#if TPH_SAMPLING_CHECK_NOPS == 68U
         "nop \n nop \n nop \n nop \n nop \n nop \n nop \n nop \n "
-        "nop \n nop \n nop \n nop \n"
+        "nop \n nop \n nop \n"
+#endif
         ::: "memory"
     );
 }
