@@ -30,11 +30,17 @@ h=r'''
 #define SysTick_IRQn 0
 static struct{volatile uint32_t CTRL,LOAD,VAL;}tick;
 static struct{volatile uint32_t ICSR;}scb;
-static struct{volatile uint32_t CYCCNT;}dwt;
+static struct{volatile uint32_t CYCCNT,CTRL;}dwt;
+static struct{volatile uint32_t DEMCR;}debug;
+#define CoreDebug (&debug)
+#define CoreDebug_DEMCR_TRCENA_Msk (1U<<24)
+#define DWT_CTRL_CYCCNTENA_Msk 1U
+#define __DSB() ((void)0)
+#define __ISB() ((void)0)
 #define SysTick (&tick)
 #define SCB (&scb)
 #define DWT (&dwt)
-#define __NOP() do{if(mode!=7)++dwt.CYCCNT;}while(0)
+#define __NOP() do{if(mode!=7 && (debug.DEMCR&CoreDebug_DEMCR_TRCENA_Msk) && (dwt.CTRL&DWT_CTRL_CYCCNTENA_Msk))++dwt.CYCCNT;}while(0)
 static uint32_t SystemCoreClock=200000000U;
 static unsigned enDmaRxDone,head,actual_fires,mode;
 typedef struct{unsigned columns;}printer_row_audit_t;
@@ -68,6 +74,9 @@ int main(int argc,char**argv){
  for(unsigned c=0;c<1180;c++)assert(HC32_LinePacket(row+c*100,&old_head,&legacy));
  if(mode>=6){assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMING&&!actual_fires&&!head);assert(SysTick->CTRL==(mode==6?1U:0U));free(row);puts("PASS busy SysTick/dead DWT rejected before ARM or firing");return 0;}
  assert(s_line.state==PL_READY&&!actual_fires&&!head);
+ assert((debug.DEMCR&CoreDebug_DEMCR_TRCENA_Msk)&&(dwt.CTRL&DWT_CTRL_CYCCNTENA_Msk));
+ /* Fresh boot starts disabled. Readiness must enable, not reset, CYCCNT. */
+ assert(DWT->CYCCNT==(mode==5?UINT32_MAX-99999U:1U));
  pl_command(p,PL_ARM,1,720,crc);assert(HC32_LinePacket(p,&old_head,&legacy));assert(s_line.state==PL_ARMED&&head&&!actual_fires);
  if(mode==4)enDmaRxDone=SET;
  HC32_RunBufferedLine();assert(!head&&!SysTick->CTRL);

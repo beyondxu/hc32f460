@@ -3,7 +3,7 @@
 Requires the BK branch `codex/printer-cached-line-timer`. Rebuild the existing
 MDK/spi_dma.uvprojx project; new logic is included by main.c, so no extra C source
 entry or wiring change is needed. Flash HC32 first, then BK. HC32 boot prints
-LBUFv1 capacity=118000; BK prints APP_SERVICE_CMY_BUFFERED_V10. Old BK per-column
+LBUFv1 clock_init_v2 capacity=118000; BK prints APP_SERVICE_CMY_BUFFERED_V10. Old BK per-column
 PCTL remains supported, but new BK refuses an old HC32 peer before motion.
 
 ## Stationary transfer
@@ -31,7 +31,10 @@ status read instead of pretending transmit returns the same100 clocks.
 
 ## ARM and single start
 
-At READY check200MHz SystemCoreClock, moving DWT and unused SysTick. ARM powers
+At READY check200MHz SystemCoreClock and unused SysTick, explicitly enable trace
+and DWT CYCCNT without resetting the shared counter, then verify it advances.
+This must happen before ARM: head power-on initializes DWT too late for READY.
+Clock failures log HCLK_INVALID, SYSTICK_BUSY or DWT_STOPPED and reject before firing. ARM powers
 and resets the head to idle and completes all console output BEFORE reporting
 ready. No nozzle fires before the start edge. After the ARM packet's release,
 receive DMA is armed only for pre-start cancellation. A complete DMA packet has

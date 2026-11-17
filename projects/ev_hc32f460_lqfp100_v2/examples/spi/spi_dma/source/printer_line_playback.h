@@ -24,10 +24,16 @@ static void HC32_LineFire(void){
 }
 void SysTick_Handler(void){HC32_LineFire();}
 static int HC32_LineClockReady(void){
- if(SystemCoreClock!=200000000U || (SysTick->CTRL&SysTick_CTRL_ENABLE_Msk))return 0;
+ if(SystemCoreClock!=200000000U){printf("[HC32 LINE_CLOCK] HCLK_INVALID\r\n");return 0;}
+ if(SysTick->CTRL&SysTick_CTRL_ENABLE_Msk){printf("[HC32 LINE_CLOCK] SYSTICK_BUSY\r\n");return 0;}
+ /* READY is checked before ARM/Power(ENABLE). Start the cycle clock here;
+  * never reset CYCCNT, which is also used by the head idle-time guard. */
+ CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+ DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+ __DSB();__ISB();
  uint32_t before=DWT->CYCCNT;
- for(unsigned i=0;i<32U;i++)__NOP();
- return DWT->CYCCNT!=before;
+ for(unsigned i=0;i<1000U;i++){__NOP();if(DWT->CYCCNT!=before)return 1;}
+ printf("[HC32 LINE_CLOCK] DWT_STOPPED\r\n");return 0;
 }
 static int HC32_LinePacket(const uint8_t*p,uint8_t*head,printer_row_audit_t*legacy){
  if(!pl_receive(&s_line,p))return 0;
