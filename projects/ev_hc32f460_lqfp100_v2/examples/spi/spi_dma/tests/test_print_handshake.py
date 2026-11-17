@@ -14,6 +14,7 @@ harness = r'''
 #include <string.h>
 #include "printer_control.h"
 #include "printer_row_audit.h"
+#include "printer_line_cache.h"
 #define DISABLE 0
 #define ENABLE 1
 #define RESET 0
@@ -34,6 +35,9 @@ static jmp_buf stop;
 struct event {int sync, done;};
 static struct event events[32];
 static int mode, power;
+static printer_line_cache_t s_line;
+static int HC32_LinePacket(const uint8_t*p,uint8_t*h,printer_row_audit_t*a){(void)h;(void)a;return pl_receive(&s_line,p);}
+static void HC32_RunBufferedLine(void){assert(!"legacy scenario must not arm a cached line");}
 static void TPH_M0333N_Power(int state) {power=state;}
 static void Slave_Arm_SPI_DMA(uint8_t *tx, uint8_t *rx, uint16_t len) {
     assert(len==100); enDmaRxDone=RESET; dma_buffer=rx; ++arms;

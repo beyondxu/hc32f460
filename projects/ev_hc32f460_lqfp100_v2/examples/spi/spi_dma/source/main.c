@@ -357,6 +357,8 @@ void HC32_PowerOn_SelfTest_100B(void) {
 
 
 
+#include "printer_line_playback.h"
+
 /* Per-column handshake: READY high = RX armed; READY low = DMA accepted,
  * firing or rearming. SYNC must remain low until READY acknowledges it.
  */
@@ -366,10 +368,18 @@ void HC32_Realtime_Print_Engine(void) {
     printer_row_audit_t row_audit = {0};
     printf("[HC32 CONTROL] PCTLv1 ROW_AUDIT_v1 LATCH_RESET_v1 ready power=OFF\r\n");
     u8CurrentBufIdx = 0U;
+    pl_status(&s_line,u8SelfTestTxBuf);
     Slave_Arm_SPI_DMA(u8SelfTestTxBuf, u8PrintBuffer[0], TPH_COLUMN_BYTES);
     GPIO_SetPins(READY_PORT, READY_PIN);
 
     for (;;) {
+        if (s_line.state==PL_ARMED) {
+            HC32_RunBufferedLine();
+            pl_status(&s_line,u8SelfTestTxBuf);
+            Slave_Arm_SPI_DMA(u8SelfTestTxBuf,u8PrintBuffer[u8CurrentBufIdx],TPH_COLUMN_BYTES);
+            GPIO_SetPins(READY_PORT,READY_PIN);
+            continue;
+        }
         if (PIN_RESET != GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) continue;
 
         /* Never use a partially received column. If the master cancels its
@@ -383,7 +393,9 @@ void HC32_Realtime_Print_Engine(void) {
             /* DMA owns no further writes to this buffer after completion. */
             __DMB();
             const uint8_t *column = u8PrintBuffer[u8CurrentBufIdx];
-            if (column[0] == PRINTER_CONTROL_TAG) {
+            if (HC32_LinePacket(column,&head_powered,&row_audit)) {
+                /* Buffered download/arm packets never take the legacy fire path. */
+            } else if (column[0] == PRINTER_CONTROL_TAG) {
                 unsigned valid = column[1] == PRINTER_CONTROL_ON || column[1] == PRINTER_CONTROL_OFF;
                 for (unsigned i = 0; i < PRINTER_CONTROL_MAGIC_LEN; ++i)
                     if (column[i + 2] != (uint8_t)PRINTER_CONTROL_MAGIC[i]) valid = 0;
@@ -426,6 +438,7 @@ void HC32_Realtime_Print_Engine(void) {
             ++row_audit.canceled;
         }
         while (PIN_RESET == GPIO_ReadInputPins(SYNC_PORT, SYNC_PIN)) {}
+        pl_status(&s_line,u8SelfTestTxBuf);
         Slave_Arm_SPI_DMA(u8SelfTestTxBuf,
                          u8PrintBuffer[u8CurrentBufIdx], TPH_COLUMN_BYTES);
         GPIO_SetPins(READY_PORT, READY_PIN);
@@ -442,6 +455,7 @@ int32_t main(void) {
     (void)LL_PrintfInit(J4_UART_UNIT, 115200UL, J4_UART_PreInit);
     printf("\r\n==============================================\r\n");
     printf("   HC32F460 Coprocessor Firmware Starting...   \r\n");
+    printf("[HC32 LINE_BUFFER] LBUFv1 capacity=118000 SysTick_line_only requires_BK_buffered_peer\r\n");
     printf("[HC32 SAMPLING] check_v1 mode=%s nops=%u measured_width_unverified\r\n",
            TPH_SAMPLING_CHECK_MODE, TPH_SAMPLING_SELECTED_NOPS);
     printf("==============================================\r\n");
