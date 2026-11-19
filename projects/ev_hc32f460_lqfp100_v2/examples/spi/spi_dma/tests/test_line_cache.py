@@ -26,7 +26,9 @@ int main(void){
   if(mode==1||mode==2||mode==3)assert(c->state==PL_ERROR&&!c->fired);
   else {assert(c->state==PL_ARMED);c->state=PL_RUNNING;c->fired=1180;c->state=PL_DONE;pl_status(c,status);assert(pl_get16(status+14)==1180);}
  }
- pl_command(p,PL_BEGIN,9,599,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN,9,PL_MIN_PERIOD_US-1U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN,9,PL_MIN_PERIOD_US,crc);pl_receive(c,p);assert(c->state==PL_LOADING);
+ pl_command(p,PL_BEGIN,9,542U,crc);pl_receive(c,p);assert(c->state==PL_LOADING);
  pl_command(p,PL_BEGIN,9,720,crc);pl_receive(c,p);memset(p,0,100);p[30]=0x40;pl_receive(c,p);assert(c->state==PL_ERROR&&c->error==PL_BAD_DATA&&!c->received);
  pl_command(p,PL_BEGIN,10,720,crc);p[90]=1;pl_receive(c,p);assert(c->state==PL_ERROR);
  pl_command(p,PL_CANCEL,10,720,crc);pl_receive(c,p);assert(c->state==PL_ERROR&&c->error==PL_CANCELED);

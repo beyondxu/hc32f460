@@ -9,7 +9,8 @@
 #define PL_BEGIN 0x10U
 #define PL_ARM 0x11U
 #define PL_CANCEL 0x12U
-#define PL_MIN_PERIOD_US 600U
+/* V29 speed trial: retain the playback20us deadline/overrun guard. */
+#define PL_MIN_PERIOD_US 500U
 #define PL_MAX_PERIOD_US 3000U
 #define PL_MAGIC "LBUFv1"
 enum {PL_IDLE,PL_LOADING,PL_READY,PL_ARMED,PL_RUNNING,PL_DONE,PL_ERROR};

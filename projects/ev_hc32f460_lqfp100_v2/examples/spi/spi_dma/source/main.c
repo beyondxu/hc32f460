@@ -455,7 +455,7 @@ int32_t main(void) {
     (void)LL_PrintfInit(J4_UART_UNIT, 115200UL, J4_UART_PreInit);
     printf("\r\n==============================================\r\n");
     printf("   HC32F460 Coprocessor Firmware Starting...   \r\n");
-    printf("[HC32 LINE_BUFFER] LBUFv1 clock_init_v2 capacity=118000 SysTick_line_only requires_BK_buffered_peer\r\n");
+    printf("[HC32 LINE_BUFFER] LBUFv1 clock_init_v2 speed_trial_v3 min_period_us=500 deadline_guard_us=20 capacity=118000 SysTick_line_only requires_BK_buffered_peer\r\n");
     printf("[HC32 SAMPLING] check_v1 mode=%s nops=%u measured_width_unverified\r\n",
            TPH_SAMPLING_CHECK_MODE, TPH_SAMPLING_SELECTED_NOPS);
     printf("==============================================\r\n");
