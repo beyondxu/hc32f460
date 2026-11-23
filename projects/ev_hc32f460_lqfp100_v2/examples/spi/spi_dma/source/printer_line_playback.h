@@ -13,7 +13,9 @@ static void HC32_LineFire(void){
  uint32_t late=(uint32_t)(start-s_line_epoch)-expected;
  if(late>s_line_max_late)s_line_max_late=late;
  const uint8_t*p=s_line.data+(uint32_t)s_line.fired*PL_BYTES;
- TPH_FireOneColumn(p);
+ if(s_line.fire_profile==PL_FIRE_PRESPRAY)TPH_FireOneColumn_Prespray(p);
+ else if(s_line.fire_profile==PL_FIRE_NORMAL)TPH_FireOneColumn(p);
+ else {HC32_LineStop(PL_BAD_COMMAND);return;}
  unsigned bits=0;for(unsigned i=0;i<PL_BYTES;i++)for(unsigned b=0;b<6;b++)bits+=(p[i]>>b)&1U;
  printer_row_audit_column(&s_line_audit,p,bits,1U);
  uint32_t duration=(uint32_t)(DWT->CYCCNT-start);
@@ -43,7 +45,7 @@ static int HC32_LinePacket(const uint8_t*p,uint8_t*head,printer_row_audit_t*lega
   s_line_max_late=0;s_line_max_fire=0;
   TPH_M0333N_Power(ENABLE); /* settle and printf BEFORE the start edge */
   printer_row_audit_begin(&s_line_audit);
-  printf("[HC32 LINE_ARMED] token=%lu columns=%u period_us=%lu crc32=%08lX no_fires_until_SYNC\r\n",(unsigned long)s_line.token,PL_COLUMNS,(unsigned long)s_line.period_us,(unsigned long)s_line.expected_crc);
+  printf("[HC32 LINE_ARMED] token=%lu columns=%u period_us=%lu crc32=%08lX fire_profile=%u extra_pad_nops=%u no_fires_until_SYNC\r\n",(unsigned long)s_line.token,PL_COLUMNS,(unsigned long)s_line.period_us,(unsigned long)s_line.expected_crc,s_line.fire_profile,s_line.fire_profile?PL_PRESPRAY_PAD_NOPS:0U);
  }
  return 1;
 }

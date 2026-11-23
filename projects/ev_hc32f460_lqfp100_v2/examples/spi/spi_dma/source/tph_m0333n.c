@@ -451,6 +451,19 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     TPH_Column_Cooldown();
 }
 
+/* Dedicated prespray function. Reuse the exact A/D/S train and zero stop,
+ * adding16 NOPs per address group (~80ns at200MHz, NOT a calibrated2.2us).
+ * The ordinary function above is not changed. No pulse-width/CE preheat mode.
+ */
+#include "printer_line_protocol.h"
+#pragma push_macro("TPH_DIRECT_PORT_PAD_NOPS")
+#undef TPH_DIRECT_PORT_PAD_NOPS
+#define TPH_DIRECT_PORT_PAD_NOPS PL_PRESPRAY_PAD_NOPS
+#define TPH_FireOneColumn TPH_FireOneColumn_Prespray
+#include "tph_direct_port_fire.inc"
+#undef TPH_FireOneColumn
+#pragma pop_macro("TPH_DIRECT_PORT_PAD_NOPS")
+
 /* ========================================================================== */
 /* ★ 4. 喷头 GPIO 引脚初始化与规范上下电                                    ★ */
 /* ========================================================================== */

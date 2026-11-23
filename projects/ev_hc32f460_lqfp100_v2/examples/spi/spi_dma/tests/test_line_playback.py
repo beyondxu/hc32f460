@@ -42,7 +42,7 @@ static struct{volatile uint32_t DEMCR;}debug;
 #define DWT (&dwt)
 #define __NOP() do{if(mode!=7 && (debug.DEMCR&CoreDebug_DEMCR_TRCENA_Msk) && (dwt.CTRL&DWT_CTRL_CYCCNTENA_Msk))++dwt.CYCCNT;}while(0)
 static uint32_t SystemCoreClock=200000000U;
-static unsigned enDmaRxDone,head,actual_fires,mode;
+static unsigned enDmaRxDone,head,actual_fires,mode,normal_calls,prespray_calls;
 static uint32_t trial_period;
 typedef struct{unsigned columns;}printer_row_audit_t;
 static void printer_row_audit_begin(printer_row_audit_t*a){a->columns=0;}
@@ -53,7 +53,8 @@ static void GPIO_ResetPins(unsigned p,unsigned pin){(void)p;(void)pin;}
 static void DMA_ChCmd(unsigned a,unsigned b,unsigned c){(void)a;(void)b;assert(!c);}
 static void NVIC_SetPriority(unsigned a,unsigned b){(void)a;assert(!b);}
 static void TPH_M0333N_Power(unsigned on){head=on;}
-static void TPH_FireOneColumn(const uint8_t*p){assert(head);for(unsigned i=0;i<100;i++)assert(p[i]==((actual_fires+i)&63U));++actual_fires;DWT->CYCCNT+=mode==10?(trial_period-20U)*200U:mode==11?(trial_period-21U)*200U:30000U;}
+static void TPH_FireOneColumn(const uint8_t*p){if(!prespray_calls)++normal_calls;assert(head);for(unsigned i=0;i<100;i++)assert(p[i]==((actual_fires+i)&63U));++actual_fires;DWT->CYCCNT+=mode==10?(trial_period-20U)*200U:mode==11?(trial_period-21U)*200U:30000U;}
+static void TPH_FireOneColumn_Prespray(const uint8_t*p){++prespray_calls;TPH_FireOneColumn(p);}
 #include "printer_line_playback.h"
 static unsigned GPIO_ReadInputPins(unsigned p,unsigned pin){
  (void)p;(void)pin;
@@ -71,7 +72,7 @@ int main(int argc,char**argv){
  for(unsigned c=0;c<1180;c++)for(unsigned i=0;i<100;i++)row[c*100+i]=(c+i)&63U;
  if(mode==6)SysTick->CTRL=SysTick_CTRL_ENABLE_Msk;
  uint8_t old_head=0;printer_row_audit_t legacy={0};uint32_t crc=pl_crc(row,PL_ROW_BYTES);
- pl_command(p,PL_BEGIN,1,trial_period,crc);assert(HC32_LinePacket(p,&old_head,&legacy));
+ pl_command(p,mode>=12?PL_BEGIN_PRESPRAY:PL_BEGIN,1,trial_period,crc);assert(HC32_LinePacket(p,&old_head,&legacy));
  for(unsigned c=0;c<1180;c++)assert(HC32_LinePacket(row+c*100,&old_head,&legacy));
  if(mode==6||mode==7){assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMING&&!actual_fires&&!head);assert(SysTick->CTRL==(mode==6?1U:0U));free(row);puts("PASS busy SysTick/dead DWT rejected before ARM or firing");return 0;}
  assert(s_line.state==PL_READY&&!actual_fires&&!head);
@@ -81,12 +82,21 @@ int main(int argc,char**argv){
  pl_command(p,PL_ARM,1,trial_period,crc);assert(HC32_LinePacket(p,&old_head,&legacy));assert(s_line.state==PL_ARMED&&head&&!actual_fires);
  if(mode==4)enDmaRxDone=SET;
  HC32_RunBufferedLine();assert(!head&&!SysTick->CTRL);
- if(!mode||mode==5||mode==8||mode==9||mode==11)assert(s_line.state==PL_DONE&&s_line.fired==1180&&actual_fires==1180&&s_line_audit.columns==1180);
+ if(!mode||mode==5||mode==8||mode==9||mode==11||mode>=12)assert(s_line.state==PL_DONE&&s_line.fired==1180&&actual_fires==1180&&s_line_audit.columns==1180);
  if(mode==1)assert(s_line.state==PL_ERROR&&s_line.error==PL_CANCELED&&actual_fires==10);
  if(mode==2)assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMING&&actual_fires==10);
  if(mode==3)assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMEOUT&&!actual_fires);
  if(mode==4)assert(s_line.state==PL_ERROR&&s_line.error==PL_CANCELED&&!actual_fires);
  if(mode==10)assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMING&&actual_fires==1);
+ if(mode>=12){
+  assert(prespray_calls==1180&&!normal_calls&&s_line.fire_profile==PL_FIRE_PRESPRAY);
+  pl_command(p,PL_BEGIN,2,trial_period,crc);HC32_LinePacket(p,&old_head,&legacy);
+  assert(s_line.fire_profile==PL_FIRE_NORMAL);
+  for(unsigned c=0;c<1180;++c)HC32_LinePacket(row+c*100,&old_head,&legacy);
+  pl_command(p,PL_ARM,2,trial_period,crc);HC32_LinePacket(p,&old_head,&legacy);
+  actual_fires=0;prespray_calls=0;HC32_RunBufferedLine();
+  assert(normal_calls==1180&&!prespray_calls&&s_line.state==PL_DONE&&!head);
+ }
  unsigned old=actual_fires;SysTick_Handler();assert(old==actual_fires);free(row);
  puts("PASS real SysTick playback, fixed deadlines, no pre-start fires, cancellation/lateness/timeout, bounded count and power OFF");
 }
@@ -94,4 +104,4 @@ int main(int argc,char**argv){
 with tempfile.TemporaryDirectory() as t:
  p=Path(t);(p/'test.c').write_text(h)
  subprocess.run(['cc','-std=c99','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(S),str(p/'test.c'),'-o',str(p/'test')],check=True)
- for mode in range(12):subprocess.run([str(p/'test'),str(mode)],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
+ for mode in range(13):subprocess.run([str(p/'test'),str(mode)],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})

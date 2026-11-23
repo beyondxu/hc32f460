@@ -32,6 +32,11 @@ int main(void){
  pl_command(p,PL_BEGIN,9,720,crc);pl_receive(c,p);memset(p,0,100);p[30]=0x40;pl_receive(c,p);assert(c->state==PL_ERROR&&c->error==PL_BAD_DATA&&!c->received);
  pl_command(p,PL_BEGIN,10,720,crc);p[90]=1;pl_receive(c,p);assert(c->state==PL_ERROR);
  pl_command(p,PL_CANCEL,10,720,crc);pl_receive(c,p);assert(c->state==PL_ERROR&&c->error==PL_CANCELED);
+ pl_command(p,PL_BEGIN_PRESPRAY,20,673,crc);pl_receive(c,p);assert(c->fire_profile==PL_FIRE_PRESPRAY&&c->state==PL_LOADING);
+ pl_status(c,status);assert(status[10]&PL_CAP_PRESPRAY_FIRE);assert(status[11]==1&&status[32]==16&&pl_status_valid(status));
+ pl_command(p,PL_CANCEL,20,673,crc);pl_receive(c,p);assert(c->fire_profile==PL_FIRE_NORMAL&&c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN_PRESPRAY,21,673,crc);pl_receive(c,p);assert(c->fire_profile==1);
+ pl_command(p,PL_BEGIN,22,673,crc);pl_receive(c,p);assert(c->fire_profile==0&&c->state==PL_LOADING);
  free(c);free(row);puts("PASS exact118000-byte cache, capacity, CRC, incomplete/wrong-token arm, period/data/reserved bounds, cancellation");
 }
 '''

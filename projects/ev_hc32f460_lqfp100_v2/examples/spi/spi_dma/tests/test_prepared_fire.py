@@ -44,6 +44,7 @@ if arm.exists():
    for i in range(1,len(chunks),2):
     name,section=chunks[i:i+2]
     if not name.startswith('TPH_FireOneColumn'):continue
+    active_pad=16 if name.startswith('TPH_FireOneColumn_Prespray') else pad
     if 'dmb\tsy' not in section:continue
     first=section.index('dmb\tsy');last=section.index('dsb\tsy',first);live=section[first:last]
     assert not re.search(r'\t(?:bl|blx)(?:\.|\s)',live),live
@@ -65,9 +66,9 @@ if arm.exists():
      elif run:runs.append(run);run=0
     if run:runs.append(run)
     assert runs.count(nop_count)==8,(opt,pad,runs)
-    if pad:assert pad in runs,(opt,pad,runs)
+    if active_pad:assert active_pad in runs,(opt,active_pad,runs)
     # A compiler-generated, skipped literal-pool alignment NOP may also occur.
-    assert 0<=actual_nops-(8*nop_count+pad)<=3,(opt,pad,actual_nops,runs)
+    assert 0<=actual_nops-(8*nop_count+active_pad)<=3,(opt,pad,actual_nops,runs)
     windows.append(name)
    assert windows,(opt,'missing actual live window')
    stack=(t/(opt+str(pad)+'-'+str(cooldown)+'-'+str(check)+'-'+str(count)+'.su')).read_text()

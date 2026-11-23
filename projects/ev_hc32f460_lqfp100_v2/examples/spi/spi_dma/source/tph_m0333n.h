@@ -95,6 +95,7 @@ typedef enum {
 /* 驱动接口函数声明 */
 void TPH_M0333N_Init(void);
 void TPH_M0333N_Power(en_functional_state_t enState);
+void TPH_FireOneColumn_Prespray(const uint8_t *pColumn100B);
 void TPH_FireOneColumn(const uint8_t *pColumn100B);
 void TPH_Test_SingleColor_Fire(tph_color_channel_t color);
 
