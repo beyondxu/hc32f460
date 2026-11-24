@@ -357,8 +357,8 @@ void TPH_M0333N_Power(en_functional_state_t enState) {
 #ifndef TPH_DIRECT_PORT_PAD_NOPS
 #define TPH_DIRECT_PORT_PAD_NOPS 0
 #endif
-#if TPH_DIRECT_PORT_PAD_NOPS < 0 || TPH_DIRECT_PORT_PAD_NOPS > 16 || (TPH_DIRECT_PORT_PAD_NOPS % 4) != 0
-#error TPH_DIRECT_PORT_PAD_NOPS must be 0, 4, 8, 12 or 16
+#if TPH_DIRECT_PORT_PAD_NOPS < 0 || TPH_DIRECT_PORT_PAD_NOPS > 32 || (TPH_DIRECT_PORT_PAD_NOPS % 4) != 0
+#error TPH_DIRECT_PORT_PAD_NOPS must be a multiple of4 from0 through32
 #endif
 
 void TPH_FireOneColumn(const uint8_t *pColumn100B) {
@@ -440,6 +440,18 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
 #if TPH_DIRECT_PORT_PAD_NOPS >= 16
         __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
 #endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 20
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 24
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 28
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
+#if TPH_DIRECT_PORT_PAD_NOPS >= 32
+        __asm volatile ("nop\n nop\n nop\n nop\n" ::: "memory");
+#endif
         ++group;
     } while (group != end);
 
@@ -452,7 +464,7 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
 }
 
 /* Dedicated prespray function. Reuse the exact A/D/S train and zero stop,
- * adding16 NOPs per address group (~80ns at200MHz, NOT a calibrated2.2us).
+ * adding32 NOPs per address group (~160ns at200MHz, NOT a calibrated2.2us).
  * The ordinary function above is not changed. No pulse-width/CE preheat mode.
  */
 #include "printer_line_protocol.h"

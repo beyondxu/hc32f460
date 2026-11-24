@@ -44,7 +44,7 @@ if arm.exists():
    for i in range(1,len(chunks),2):
     name,section=chunks[i:i+2]
     if not name.startswith('TPH_FireOneColumn'):continue
-    active_pad=16 if name.startswith('TPH_FireOneColumn_Prespray') else pad
+    active_pad=32 if name.startswith('TPH_FireOneColumn_Prespray') else pad
     if 'dmb\tsy' not in section:continue
     first=section.index('dmb\tsy');last=section.index('dsb\tsy',first);live=section[first:last]
     assert not re.search(r'\t(?:bl|blx)(?:\.|\s)',live),live
