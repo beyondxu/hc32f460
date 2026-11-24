@@ -68,11 +68,11 @@ static unsigned GPIO_ReadInputPins(unsigned p,unsigned pin){
  return PIN_SET;
 }
 int main(int argc,char**argv){
- assert(argc==2);mode=atoi(argv[1]);trial_period=mode>=8?(mode==9?500U:542U):720U;if(mode==5)DWT->CYCCNT=UINT32_MAX-100000U;uint8_t p[100];uint8_t*row=malloc(PL_ROW_BYTES);
+ assert(argc==2);unsigned requested=atoi(argv[1]);unsigned fast=requested>=13;mode=fast?(requested==13?12U:requested==14?10U:requested==15?11U:requested==16?2U:requested==17?1U:5U):requested;trial_period=mode>=8?(mode==9?500U:542U):720U;if(fast)trial_period=300U;if(mode==5)DWT->CYCCNT=UINT32_MAX-100000U;uint8_t p[100];uint8_t*row=malloc(PL_ROW_BYTES);
  for(unsigned c=0;c<1180;c++)for(unsigned i=0;i<100;i++)row[c*100+i]=(c+i)&63U;
  if(mode==6)SysTick->CTRL=SysTick_CTRL_ENABLE_Msk;
  uint8_t old_head=0;printer_row_audit_t legacy={0};uint32_t crc=pl_crc(row,PL_ROW_BYTES);
- pl_command(p,mode>=12?PL_BEGIN_PRESPRAY:PL_BEGIN,1,trial_period,crc);assert(HC32_LinePacket(p,&old_head,&legacy));
+ pl_command(p,(fast||mode>=12)?PL_BEGIN_PRESPRAY:PL_BEGIN,1,trial_period,crc);assert(HC32_LinePacket(p,&old_head,&legacy));
  for(unsigned c=0;c<1180;c++)assert(HC32_LinePacket(row+c*100,&old_head,&legacy));
  if(mode==6||mode==7){assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMING&&!actual_fires&&!head);assert(SysTick->CTRL==(mode==6?1U:0U));free(row);puts("PASS busy SysTick/dead DWT rejected before ARM or firing");return 0;}
  assert(s_line.state==PL_READY&&!actual_fires&&!head);
@@ -90,6 +90,7 @@ int main(int argc,char**argv){
  if(mode==10)assert(s_line.state==PL_ERROR&&s_line.error==PL_TIMING&&actual_fires==1);
  if(mode>=12){
   assert(prespray_calls==1180&&!normal_calls&&s_line.fire_profile==PL_FIRE_PRESPRAY);
+  if(fast)trial_period=673U;
   pl_command(p,PL_BEGIN,2,trial_period,crc);HC32_LinePacket(p,&old_head,&legacy);
   assert(s_line.fire_profile==PL_FIRE_NORMAL);
   for(unsigned c=0;c<1180;++c)HC32_LinePacket(row+c*100,&old_head,&legacy);
@@ -104,4 +105,4 @@ int main(int argc,char**argv){
 with tempfile.TemporaryDirectory() as t:
  p=Path(t);(p/'test.c').write_text(h)
  subprocess.run(['cc','-std=c99','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(S),str(p/'test.c'),'-o',str(p/'test')],check=True)
- for mode in range(13):subprocess.run([str(p/'test'),str(mode)],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
+ for mode in range(19):subprocess.run([str(p/'test'),str(mode)],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})

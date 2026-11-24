@@ -37,6 +37,21 @@ int main(void){
  pl_command(p,PL_CANCEL,20,673,crc);pl_receive(c,p);assert(c->fire_profile==PL_FIRE_NORMAL&&c->state==PL_ERROR);
  pl_command(p,PL_BEGIN_PRESPRAY,21,673,crc);pl_receive(c,p);assert(c->fire_profile==1);
  pl_command(p,PL_BEGIN,22,673,crc);pl_receive(c,p);assert(c->fire_profile==0&&c->state==PL_LOADING);
+ /* Fast prespray only: full upload, ARM identity, cancel and role reset. */
+ assert((status[10]&(PL_CAP_PRESPRAY_FIRE|PL_CAP_PRESPRAY_FAST))==(PL_CAP_PRESPRAY_FIRE|PL_CAP_PRESPRAY_FAST));
+ assert(pl_get16(status+33)==300U);
+ pl_command(p,PL_BEGIN_PRESPRAY,30,299U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN_PRESPRAY,31,300U,crc);pl_receive(c,p);assert(c->state==PL_LOADING);
+ /* A normal BEGIN must not inherit permission from a previous fast role. */
+ pl_command(p,PL_BEGIN,32,300U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN_PRESPRAY,33,300U,crc);pl_receive(c,p);
+ for(unsigned i=0;i<PL_COLUMNS;++i)pl_receive(c,row+i*100);
+ assert(c->state==PL_READY);
+ pl_command(p,PL_ARM,33,301U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN_PRESPRAY,34,300U,crc);pl_receive(c,p);
+ for(unsigned i=0;i<PL_COLUMNS;++i)pl_receive(c,row+i*100);
+ pl_command(p,PL_ARM,34,300U,crc);pl_receive(c,p);assert(c->state==PL_ARMED);
+ pl_command(p,PL_CANCEL,34,300U,crc);pl_receive(c,p);assert(c->error==PL_CANCELED&&c->fire_profile==PL_FIRE_NORMAL);
  free(c);free(row);puts("PASS exact118000-byte cache, capacity, CRC, incomplete/wrong-token arm, period/data/reserved bounds, cancellation");
 }
 '''

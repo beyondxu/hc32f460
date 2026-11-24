@@ -10,7 +10,10 @@ static inline int pl_receive(printer_line_cache_t*c,const uint8_t*p){
   unsigned op=p[1];int valid=pl_get16(p+12)==PL_COLUMNS&&p[14]==0&&p[15]==0;
   for(unsigned i=24;i<PL_BYTES;i++)if(p[i])valid=0;
   uint32_t token=pl_get32(p+8),period=pl_get32(p+16),crc=pl_get32(p+20);
-  if(!valid||!token||period<PL_MIN_PERIOD_US||period>PL_MAX_PERIOD_US){pl_fail(c,PL_BAD_COMMAND);return 1;}
+  /* Only explicit prespray BEGIN, or its ARM/CANCEL, may use fast periods. */
+  unsigned fast=op==PL_BEGIN_PRESPRAY||((op==PL_ARM||op==PL_CANCEL)&&c->fire_profile==PL_FIRE_PRESPRAY);
+  uint32_t min_period=fast?PL_PRESPRAY_PERIOD_US:PL_MIN_PERIOD_US;
+  if(!valid||!token||period<min_period||period>PL_MAX_PERIOD_US){pl_fail(c,PL_BAD_COMMAND);return 1;}
   if(op==PL_BEGIN||op==PL_BEGIN_PRESPRAY){c->fire_profile=(uint8_t)(op==PL_BEGIN_PRESPRAY?PL_FIRE_PRESPRAY:PL_FIRE_NORMAL);c->token=token;c->period_us=period;c->expected_crc=crc;c->crc=0xFFFFFFFFU;c->received=c->fired=0;c->error=PL_OK;c->state=PL_LOADING;}
   else if(op==PL_ARM){if(c->state!=PL_READY||token!=c->token||period!=c->period_us||crc!=c->expected_crc)pl_fail(c,PL_BAD_STATE);else c->state=PL_ARMED;}
   else if(op==PL_CANCEL)pl_fail(c,PL_CANCELED);
@@ -28,5 +31,5 @@ static inline int pl_receive(printer_line_cache_t*c,const uint8_t*p){
  /* RX dummy bytes clocking a status reply must never turn into nozzle data. */
  return c->state!=PL_IDLE;
 }
-static inline void pl_status(const printer_line_cache_t*c,uint8_t*p){memset(p,0,PL_BYTES);p[0]=0x81U;memcpy(p+2,PL_MAGIC,6);p[8]=c->state;p[9]=c->error;p[10]=PL_CAP_PRESPRAY_FIRE;p[11]=c->fire_profile;p[32]=PL_PRESPRAY_PAD_NOPS;pl_put16(p+12,c->received);pl_put16(p+14,c->fired);pl_put32(p+16,c->token);pl_put32(p+20,c->period_us);pl_put32(p+24,c->crc^0xFFFFFFFFU);pl_put32(p+28,c->expected_crc);pl_put32(p+96,pl_crc(p,96));}
+static inline void pl_status(const printer_line_cache_t*c,uint8_t*p){memset(p,0,PL_BYTES);p[0]=0x81U;memcpy(p+2,PL_MAGIC,6);p[8]=c->state;p[9]=c->error;p[10]=PL_CAP_PRESPRAY_FIRE|PL_CAP_PRESPRAY_FAST;p[11]=c->fire_profile;p[32]=PL_PRESPRAY_PAD_NOPS;pl_put16(p+33,PL_PRESPRAY_PERIOD_US);pl_put16(p+12,c->received);pl_put16(p+14,c->fired);pl_put32(p+16,c->token);pl_put32(p+20,c->period_us);pl_put32(p+24,c->crc^0xFFFFFFFFU);pl_put32(p+28,c->expected_crc);pl_put32(p+96,pl_crc(p,96));}
 #endif

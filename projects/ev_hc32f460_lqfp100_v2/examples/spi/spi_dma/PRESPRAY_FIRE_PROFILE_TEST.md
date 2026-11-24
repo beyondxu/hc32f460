@@ -1,3 +1,7 @@
+> Current V52 changes only automatic prespray to300us/5ms; BOTH MCUs must
+> be updated. See FAST_PRESPRAY_300US.md. Earlier period/pause details below
+> describe previous comparisons.
+
 # Dedicated prespray firing profile: V50 pad32 comparison
 
 This revision changes BOTH BK and HC32. Update/build/flash HC32 first, then BK.
