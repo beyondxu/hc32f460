@@ -44,7 +44,7 @@ static struct{volatile uint32_t DEMCR;}debug;
 static uint32_t SystemCoreClock=200000000U;
 static unsigned enDmaRxDone,head,actual_fires,mode,normal_calls,prespray_calls;
 static uint32_t trial_period,train_starts[8];
-static unsigned short_calls, short_cancel, short_primed, in_tick;
+static unsigned short_prepares, short_calls, short_cancel, short_primed, in_tick;
 typedef struct{unsigned columns;}printer_row_audit_t;
 static void printer_row_audit_begin(printer_row_audit_t*a){a->columns=0;}
 static void printer_row_audit_end(printer_row_audit_t*a){(void)a;}
@@ -56,9 +56,14 @@ static void NVIC_SetPriority(unsigned a,unsigned b){(void)a;assert(!b);}
 static void TPH_M0333N_Power(unsigned on){head=on;}
 static void TPH_FireOneColumn(const uint8_t*p){if(!prespray_calls)++normal_calls;assert(head);for(unsigned i=0;i<100;i++)assert(p[i]==((actual_fires+i)&63U));++actual_fires;DWT->CYCCNT+=mode==10?(trial_period-20U)*200U:mode==11?(trial_period-21U)*200U:30000U;}
 static void TPH_FireOneColumn_Prespray(const uint8_t*p){++prespray_calls;TPH_FireOneColumn(p);}
-static int TPH_FirePresprayShort(const uint8_t*p,unsigned first,unsigned count,
-                                uint32_t earliest,uint32_t latest,uint32_t*started){
- assert(head&&first==0U&&count==13U&&p[0]==1U&&p[48]==1U);
+static int TPH_PreparePresprayShort(const uint8_t*p,unsigned first,unsigned count){
+ assert(head&&first==0U&&count==13U&&p[0]==p[48]&&(p[0]==1U||p[0]==2U));
+ ++short_prepares;
+ DWT->CYCCNT+=1800U; /* 9 us exceeds the old 8 us start deadline. */
+ return 1;
+}
+static int TPH_FirePresprayShort(uint32_t earliest,uint32_t latest,uint32_t*started){
+ assert(head&&short_prepares);
  uint32_t ready=DWT->CYCCNT+200U;
  if(short_calls==1U&&mode==20)ready+=1800U;
  if(short_calls==0U&&mode==19)ready+=1000U;
@@ -95,10 +100,10 @@ int main(int argc,char**argv){
   uint8_t p[100],old_head=0;
   printer_row_audit_t legacy={0};
   uint8_t *row=calloc(PL_ROW_BYTES,1U);assert(row);
-  for(unsigned col=40;col<1000U;col+=16U)
+  for(unsigned col=40;col<1000U;col+=8U)
    for(unsigned shot=0;shot<8U;++shot){
     uint8_t *data=row+(col+shot)*PL_BYTES;
-    data[0]=data[48]=1U;
+    data[0]=data[48]=1U+(col/8U)%2U;
    }
   uint32_t crc=pl_crc(row,PL_ROW_BYTES);
   pl_command(p,PL_BEGIN_PRESPRAY,1U,58U,crc);
@@ -110,7 +115,7 @@ int main(int argc,char**argv){
   assert(s_line.state==PL_ARMED&&head&&!short_calls);
   HC32_RunBufferedLine();
   assert(!head&&!SysTick->CTRL&&s_line.state==PL_DONE&&s_line.error==PL_OK);
-  assert(s_line.fired==PL_COLUMNS&&s_line_audit.columns==PL_COLUMNS&&short_calls==480U);
+  assert(s_line.fired==PL_COLUMNS&&s_line_audit.columns==PL_COLUMNS&&short_calls==960U&&short_prepares==120U);
   assert(s_short_min_repeat==11600U&&s_short_max_repeat==11600U&&!normal_calls&&!prespray_calls);
   free(row);
   puts("PASS complete short-scan upload, ARM/SYNC, blank-slot gating, repeat timing and power OFF");
@@ -124,6 +129,7 @@ int main(int argc,char**argv){
    uint8_t *p=s_line.data+j*PL_BYTES;
    p[0]=p[48]=1;s_line.received=j;assert(pl_short_column(&s_line,p));
   }
+  assert(HC32_PrepareShortBurst(0U));
   for(unsigned j=0;j<8U&&s_line.state==PL_RUNNING;++j){
    short_cancel=j==1U&&mode==21;
    DWT->CYCCNT=s_line_epoch+j*11600U;

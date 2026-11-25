@@ -8,6 +8,12 @@ stops, check BK `WASTE_FIRE_STOP` and HC `PRESPRAY_TIMING_STOP` for the
 failed stage. A completed row records drive requests. Ink delivery requires
 observation at the pad.
 
+The HC32 `short_train_preload=1` build preloads each burst's GPIO words
+during the preceding slot and reuses them for all repeated shots. This
+moves preparation outside the firing slot that previously failed at slot 40
+(zero-based) on hardware. The 58 µs repeat floor, firing window and stop
+sequence are retained.
+
 ## V54 60 µs baseline
 
 Build and flash HC32 first, then BK7258. Both sides must advertise/accept the

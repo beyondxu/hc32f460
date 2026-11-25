@@ -12,6 +12,12 @@ static uint32_t s_short_started,s_short_min_repeat,s_short_max_repeat;
 static int HC32_ShortPrespray(void){
  return s_line.fire_profile==PL_FIRE_PRESPRAY&&s_line.period_us==PL_PRESPRAY_PERIOD_US;
 }
+/* Upload validation guarantees that the rest of a burst is byte-identical. */
+static int HC32_PrepareShortBurst(unsigned slot){
+ const pl_short_column_t *column=&s_line.short_columns[slot];
+ return column->burst!=1U||
+     TPH_PreparePresprayShort(s_line.data+slot*PL_BYTES,column->first,column->count);
+}
 static void HC32_AuditColumn(const uint8_t*p){
  unsigned bits=0;for(unsigned i=0;i<PL_BYTES;i++)for(unsigned b=0;b<6;b++)bits+=(p[i]>>b)&1U;
  printer_row_audit_column(&s_line_audit,p,bits,1U);
@@ -32,7 +38,7 @@ static void HC32_LineFire(void){
   if(GPIO_ReadInputPins(SYNC_PORT,SYNC_PIN)==PIN_SET){HC32_LineStop(PL_CANCELED);return;}
   const pl_short_column_t *column=&s_line.short_columns[s_line.fired];
   if(column->count){
-   /* Allow 5 us for preparation, then start at the scheduled phase.
+   /* The preceding slot prepared the train. Start at the scheduled phase.
     * Repeats also wait one period from the previous actual train start.
     * Abort if phase slips by >3 us; a missed slot is never replayed. */
    const uint32_t cycles_per_us=SystemCoreClock/1000000U;
@@ -43,7 +49,7 @@ static void HC32_LineFire(void){
     uint32_t repeat=previous+s_line_period_cycles;
     if((int32_t)(repeat-earliest)>0)earliest=repeat;
    }
-   if(!TPH_FirePresprayShort(p,column->first,column->count,earliest,
+   if(!TPH_FirePresprayShort(earliest,
                             phase+3U*cycles_per_us,&s_short_started)){
     s_short_timing_fault="train_start";
     HC32_LineStop(PL_TIMING);return;
@@ -72,6 +78,10 @@ static void HC32_LineFire(void){
   HC32_LineStop(PL_TIMING);
  }
  else if(s_line.fired==PL_COLUMNS)HC32_LineStop(PL_OK);
+ else if(short_prespray&&!HC32_PrepareShortBurst(s_line.fired)){
+  s_short_timing_fault="prepare";
+  HC32_LineStop(PL_TIMING);
+ }
 }
 void SysTick_Handler(void){HC32_LineFire();}
 static int HC32_LineClockReady(void){
@@ -114,6 +124,10 @@ static void HC32_RunBufferedLine(void){
  DMA_ChCmd(DMA_UNIT,DMA_RX_CH,DISABLE);DMA_ChCmd(DMA_UNIT,DMA_TX_CH,DISABLE);
  if(s_line.state==PL_ARMED){
   if(SystemCoreClock!=200000000U || (SysTick->CTRL&SysTick_CTRL_ENABLE_Msk))pl_fail(&s_line,PL_TIMING);
+  else if(short_prespray&&!HC32_PrepareShortBurst(0U)){
+   s_short_timing_fault="prepare";
+   pl_fail(&s_line,PL_TIMING);
+  }
   else {
    s_line_period_cycles=(SystemCoreClock/1000000U)*s_line.period_us;
    s_line.fired=0;s_line_max_late=0;s_line_max_fire=0;__DMB();s_line.state=PL_RUNNING;

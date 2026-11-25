@@ -164,9 +164,10 @@ static void run_short(){
  std::vector<Sample> previous;
  uint32_t wanted=0xfffffd00U,started=0U;
  tick=wanted-100U;
+ assert(TPH_PreparePresprayShort(c.data(),first,count));
  for(unsigned shot=0;shot<8U;++shot){
   trace.clear();
-  assert(TPH_FirePresprayShort(c.data(),first,count,wanted,wanted+100U,&started));
+  assert(TPH_FirePresprayShort(wanted,wanted+100U,&started));
   assert(started==wanted&&trace.size()==(count+2U)*4U&&ce&&!address()&&!data());
   for(unsigned a=0;a<=count;++a)for(unsigned s=0;s<4;++s){
    unsigned i=a*4U+s;
@@ -181,7 +182,7 @@ static void run_short(){
  }
  tick=wanted+100U;
  auto n=trace.size();
- assert(!TPH_FirePresprayShort(c.data(),first,count,wanted,wanted+10U,&started));
+ assert(!TPH_FirePresprayShort(wanted,wanted+10U,&started));
  assert(trace.size()==n&&ce&&!address()&&!data());
 }
 int main(){

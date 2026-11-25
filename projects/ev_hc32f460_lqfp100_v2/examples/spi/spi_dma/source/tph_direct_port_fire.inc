@@ -12,24 +12,50 @@
 #endif
 
 #ifdef TPH_SHORT_PRESPRAY
-bool TPH_FirePresprayShort(const uint8_t *pColumn100B, unsigned first, unsigned count,
-                          uint32_t earliest, uint32_t latest, uint32_t *started) {
-    if (!s_bHeadPowered || pColumn100B == NULL || !count ||
-        count > PL_PRESPRAY_SHORT_ADDRESSES || first + count > 25U) return false;
+static struct tph_group {
+    uint16_t address;
+    uint16_t data[4];
+} s_short_groups[PL_PRESPRAY_SHORT_ADDRESSES + 1U];
+static unsigned s_short_group_count;
+
+/* Called with the head idle, before the slot where this burst starts. */
+bool TPH_PreparePresprayShort(const uint8_t *column, unsigned first, unsigned count) {
+    s_short_group_count = 0U;
+    if (!s_bHeadPowered || !column || !count ||
+        first >= 25U || count > PL_PRESPRAY_SHORT_ADDRESSES || count > 25U - first)
+        return false;
+
+    const uint16_t keep_a = CM_GPIO->PODRA & (uint16_t)~DATA_PORTA_MASK;
+    const uint16_t keep_b = CM_GPIO->PODRB & (uint16_t)~ADDR_PORTB_MASK;
+    for (unsigned add = 0; add < count; ++add) {
+        unsigned index = first + add;
+        s_short_groups[add].address = s_AddrPortB_Set[index] | keep_b;
+        for (unsigned sec = 0; sec < 4U; ++sec)
+            s_short_groups[add].data[sec] = s_DataPortA_Set[column[index * 4U + sec] & 0x3FU] | keep_a;
+    }
+    s_short_groups[count].address = s_short_groups[count - 1U].address;
+    for (unsigned sec = 0; sec < 4U; ++sec)
+        s_short_groups[count].data[sec] = s_DataPortA_Set[0] | keep_a;
+    s_short_group_count = count + 1U;
+    return true;
+}
+
+bool TPH_FirePresprayShort(uint32_t earliest, uint32_t latest, uint32_t *started) {
+    if (!s_bHeadPowered || !s_short_group_count) return false;
+    uint32_t saved_primask = __get_PRIMASK();
+    __disable_irq();
+    __DMB();
+    const struct tph_group *group = s_short_groups;
+    const struct tph_group *end = group + s_short_group_count;
 #else
 void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     if (!s_bHeadPowered || pColumn100B == NULL) return;
     const unsigned first = 0U, count = 25U;
-#endif
 
     struct tph_group {
         uint16_t address;
         uint16_t data[4];
-#ifdef TPH_SHORT_PRESPRAY
-    } groups[PL_PRESPRAY_SHORT_ADDRESSES + 1U];
-#else
     } groups[26];
-#endif
     /* Immediately follow the last active address with the same address at D=0. */
     for (unsigned add = 0; add <= count; ++add) {
         unsigned index = first + (add < count ? add : count - 1U);
@@ -39,14 +65,11 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
             groups[add].data[sec] = s_DataPortA_Set[d];
         }
     }
-#ifndef TPH_SHORT_PRESPRAY
     if (s_bHaveStopTime) {
         while ((uint32_t)(DWT->CYCCNT - s_u32StopCycle) < s_u32IdleCycles) {
             /* Preserve the existing 60 us completed-column idle guard. */
         }
     }
-
-#endif
 
     uint32_t saved_primask = __get_PRIMASK();
     __disable_irq();
@@ -64,6 +87,7 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
     __DMB();
     const struct tph_group *group = groups;
     const struct tph_group *end = groups + count + 1U;
+#endif
 #ifdef TPH_SHORT_PRESPRAY
     /* Timestamp the train after preparation, with IRQs masked. Identical
      * trains follow the same instruction path from here to each firing edge. */

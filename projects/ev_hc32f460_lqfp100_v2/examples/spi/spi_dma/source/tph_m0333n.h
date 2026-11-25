@@ -97,8 +97,8 @@ typedef enum {
 void TPH_M0333N_Init(void);
 void TPH_M0333N_Power(en_functional_state_t enState);
 void TPH_FireOneColumn_Prespray(const uint8_t *pColumn100B);
-bool TPH_FirePresprayShort(const uint8_t *pColumn100B, unsigned first, unsigned count,
-                          uint32_t earliest, uint32_t latest, uint32_t *started);
+bool TPH_PreparePresprayShort(const uint8_t *column, unsigned first, unsigned count);
+bool TPH_FirePresprayShort(uint32_t earliest, uint32_t latest, uint32_t *started);
 void TPH_FireOneColumn(const uint8_t *pColumn100B);
 void TPH_Test_SingleColor_Fire(tph_color_channel_t color);
 

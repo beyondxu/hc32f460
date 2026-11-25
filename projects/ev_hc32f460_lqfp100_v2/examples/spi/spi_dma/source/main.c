@@ -456,7 +456,7 @@ int32_t main(void) {
     printf("\r\n==============================================\r\n");
     printf("   HC32F460 Coprocessor Firmware Starting...   \r\n");
     printf("[HC32 LINE_BUFFER] LBUFv1 clock_init_v2 speed_trial_v3 min_period_us=500 deadline_guard_us=20 capacity=118000 SysTick_line_only requires_BK_buffered_peer\r\n");
-    printf("[HC32 FIRE_PROFILE] cap_v1 normal_pad=0 prespray_min_period_us=58 short_addresses_max=13 prespray_pad_nops=%u nominal_extra_ns=160 tFire_unmeasured no_preheat\r\n",PL_PRESPRAY_PAD_NOPS);
+    printf("[HC32 FIRE_PROFILE] cap_v1 normal_pad=0 prespray_min_period_us=58 short_addresses_max=13 short_train_preload=1 prespray_pad_nops=%u nominal_extra_ns=160 tFire_unmeasured no_preheat\r\n",PL_PRESPRAY_PAD_NOPS);
     printf("[HC32 SAMPLING] check_v1 mode=%s nops=%u measured_width_unverified\r\n",
            TPH_SAMPLING_CHECK_MODE, TPH_SAMPLING_SELECTED_NOPS);
     printf("==============================================\r\n");
