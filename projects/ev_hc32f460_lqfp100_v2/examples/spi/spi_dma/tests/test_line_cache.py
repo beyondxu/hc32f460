@@ -39,7 +39,18 @@ int main(void){
  pl_command(p,PL_BEGIN,22,673,crc);pl_receive(c,p);assert(c->fire_profile==0&&c->state==PL_LOADING);
  /* Fast prespray only: full upload, ARM identity, cancel and role reset. */
  assert((status[10]&(PL_CAP_PRESPRAY_FIRE|PL_CAP_PRESPRAY_FAST))==(PL_CAP_PRESPRAY_FIRE|PL_CAP_PRESPRAY_FAST));
- assert(pl_get16(status+33)==300U);
+ assert(pl_get16(status+33)==60U);
+ pl_command(p,PL_BEGIN_PRESPRAY,29,59U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN,29,60U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
+ pl_command(p,PL_BEGIN_PRESPRAY,29,60U,crc);pl_receive(c,p);
+ memset(p,0,100);p[0]=p[52]=1;pl_receive(c,p);assert(c->state==PL_ERROR&&c->error==PL_BAD_DATA);
+ pl_command(p,PL_BEGIN_PRESPRAY,29,60U,crc);pl_receive(c,p);
+ memset(p,0,100);p[0]=1;pl_receive(c,p);p[1]=1;pl_receive(c,p);
+ assert(c->state==PL_ERROR&&c->error==PL_BAD_DATA);
+ pl_command(p,PL_BEGIN_PRESPRAY,29,60U,crc);pl_receive(c,p);
+ memset(p,0,100);p[0]=p[48]=1;
+ for(unsigned j=0;j<8U;++j){pl_receive(c,p);assert(c->short_columns[j].burst==j+1U);}
+ pl_receive(c,p);assert(c->state==PL_ERROR&&c->error==PL_BAD_DATA);
  pl_command(p,PL_BEGIN_PRESPRAY,30,299U,crc);pl_receive(c,p);assert(c->state==PL_ERROR);
  pl_command(p,PL_BEGIN_PRESPRAY,31,300U,crc);pl_receive(c,p);assert(c->state==PL_LOADING);
  /* A normal BEGIN must not inherit permission from a previous fast role. */

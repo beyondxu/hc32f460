@@ -2,10 +2,10 @@
 Checks structure and compiler output, not hardware edge timing or ink.
 """
 from pathlib import Path
-import re,subprocess,tempfile
+import re,shutil,subprocess,tempfile
 P=Path(__file__).resolve().parents[1];S=P/'source';src=(S/'tph_m0333n.c').read_bytes().decode('latin1')
 core=(S/'tph_continuous_ce.inc').read_text();assert core in src
-direct=(S/'tph_direct_port_fire.inc').read_text();assert direct in core
+direct=(S/'tph_direct_port_fire.inc').read_text();assert direct[direct.index("    do {\n        uint16_t address"):direct.index("    } while (group != end);")] in core
 assert src.index('__disable_irq();',src.index('void TPH_FireOneColumn('))<src.index('const uint32_t keep_a',src.index('void TPH_FireOneColumn('))
 column=core[core.index('void TPH_FireOneColumn('):]
 body=column[column.index('do {'):column.index('} while (group != end);')]
@@ -23,7 +23,7 @@ assert 'CE_HIGH();' not in column and 'CE_LOW();' not in column
 assert column.index('TPH_Reset_Idle_CE_High();')<column.index('__set_PRIMASK')
 assert core.count('CE_HIGH();')==1 # normal ON path only
 root=P.parents[4]
-arm=Path('/workspace/.setup/tools/usr/bin/arm-none-eabi-gcc');objdump=arm.with_name('arm-none-eabi-objdump')
+arm=Path(shutil.which('arm-none-eabi-gcc') or '/workspace/.setup/tools/usr/bin/arm-none-eabi-gcc');objdump=arm.with_name('arm-none-eabi-objdump')
 if arm.exists():
  incs=[S,root/'drivers/hc32_ll_driver/inc',root/'drivers/cmsis/Include',root/'drivers/cmsis/Device/HDSC/hc32f4xx/Include']
  sample=src[src.index('inline void delay_ts_400ns'):src.index('inline void delay_600ns')]
@@ -43,7 +43,14 @@ if arm.exists():
    windows=[]
    for i in range(1,len(chunks),2):
     name,section=chunks[i:i+2]
-    if not name.startswith('TPH_FireOneColumn'):continue
+    if not name.startswith(('TPH_FireOneColumn','TPH_FirePresprayShort')):continue
+    if name.startswith('TPH_FirePresprayShort'):
+     # The short path adds DWT setup before the branch back to the same GPIO loop.
+     samples=re.findall(r'(?m)^\s*[0-9a-f]+:.*	nop(?:\s|$)',section)
+     assert len(samples)>=8*nop_count+32,(opt,pad,len(samples))
+     assert not re.search(r'	(?:bl|blx)(?:\.|\s)',section),section
+     windows.append(name)
+     continue
     active_pad=32 if name.startswith('TPH_FireOneColumn_Prespray') else pad
     if 'dmb\tsy' not in section:continue
     first=section.index('dmb\tsy');last=section.index('dsb\tsy',first);live=section[first:last]

@@ -14,7 +14,9 @@
 #define PL_FIRE_PRESPRAY 1U
 #define PL_CAP_PRESPRAY_FIRE 1U
 #define PL_CAP_PRESPRAY_FAST 2U
-#define PL_PRESPRAY_PERIOD_US 300U
+#define PL_PRESPRAY_PERIOD_US 60U
+#define PL_PRESPRAY_SHORT_ADDRESSES 13U
+#define PL_PRESPRAY_BURST_MAX 8U
 #define PL_PRESPRAY_PAUSE_MS 5U
 #define PL_PRESPRAY_PAD_NOPS 32U
 /* V29 speed trial: retain the playback20us deadline/overrun guard. */

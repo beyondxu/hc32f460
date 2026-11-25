@@ -111,6 +111,12 @@ LOOKUP
 MACROS
 SAMPLE_CHECK_HEADER
 CORE
+#define PL_PRESPRAY_SHORT_ADDRESSES 13U
+#define TPH_SHORT_PRESPRAY
+#undef TPH_DIRECT_PORT_PAD_NOPS
+#define TPH_DIRECT_PORT_PAD_NOPS 32
+#include "tph_direct_port_fire.inc"
+
 static void run(const std::array<uint8_t,100>& column,unsigned saved){
  std::array<uint8_t,100> original=column;
  unsigned edges=ce_edges,old_restores=restores;trace.clear();irq=saved;restored_idle=false;
@@ -151,6 +157,33 @@ static void run(const std::array<uint8_t,100>& column,unsigned saved){
  for(unsigned s=0;s<4;++s)assert(!sample_low[s]&&s_state(s));
  assert(trace.size()==26*4+4); // final Ax=0 reset, CE still HIGH
 }
+static void run_short(){
+ std::array<uint8_t,100> c{};
+ constexpr unsigned first=12U,count=13U;
+ for(unsigned a=first;a<first+count;++a){c[4*a]=1;c[4*a+1]=1;}
+ std::vector<Sample> previous;
+ uint32_t wanted=0xfffffd00U,started=0U;
+ tick=wanted-100U;
+ for(unsigned shot=0;shot<8U;++shot){
+  trace.clear();
+  assert(TPH_FirePresprayShort(c.data(),first,count,wanted,wanted+100U,&started));
+  assert(started==wanted&&trace.size()==(count+2U)*4U&&ce&&!address()&&!data());
+  for(unsigned a=0;a<=count;++a)for(unsigned s=0;s<4;++s){
+   unsigned i=a*4U+s;
+   auto edge=trace[i];
+   assert(edge.a==s_u8AddrLut[first+(a<count?a:count-1U)]&&edge.s==s);
+   assert(edge.d==(a<count&&s<2U?1U:0U));
+   if(shot&&edge.d)assert((uint32_t)(edge.time-previous[i].time)==12000U);
+  }
+  for(unsigned i=(count+1U)*4U;i<trace.size();++i)assert(!trace[i].a&&!trace[i].d);
+  previous=trace;
+  wanted=started+12000U;
+ }
+ tick=wanted+100U;
+ auto n=trace.size();
+ assert(!TPH_FirePresprayShort(c.data(),first,count,wanted,wanted+10U,&started));
+ assert(trace.size()==n&&ce&&!address()&&!data());
+}
 int main(){
  std::array<uint8_t,100> c{};
  TPH_FireOneColumn(c.data());assert(trace.empty()&&!ce);
@@ -172,12 +205,13 @@ int main(){
 #endif
  // unsigned counter wrap is valid for the short idle gap
  tick=0xfffffff0U;s_u32StopCycle=tick;run(c,1);
+ run_short();
  TPH_M0333N_Power(0);assert(!ce&&!vp&&!vl&&irq==1);
  assert((power_events==std::vector<unsigned>{1,2,3,4,5,6}));
  for(unsigned s=0;s<4;++s)assert(!s_state(s));
  n=trace.size();TPH_FireOneColumn(c.data());assert(trace.size()==n);
  clock_frozen=true;TPH_M0333N_Power(ENABLE);assert(!s_bHeadPowered&&!ce&&!vl&&!vp);
- puts("PASS: actual LUT/GPIO mapping, 25+1 cadence, continuous CE, zero stop, idle reset, power order, IRQ restore, idle gap/wrap, NULL/OFF and clock failure");
+ puts("PASS: actual LUT/GPIO mapping, 25+1 cadence and 13+zero short train with 12000-cycle matching-S edges, continuous CE, zero stop, idle reset, power order, IRQ restore, idle gap/wrap, NULL/OFF and clock failure");
 }
 '''
 h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('SAMPLE_CHECK_HEADER\n',check_header+'\n').replace('CORE\n',core+'\n')

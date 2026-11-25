@@ -474,6 +474,9 @@ void TPH_FireOneColumn(const uint8_t *pColumn100B) {
 #define TPH_FireOneColumn TPH_FireOneColumn_Prespray
 #include "tph_direct_port_fire.inc"
 #undef TPH_FireOneColumn
+#define TPH_SHORT_PRESPRAY
+#include "tph_direct_port_fire.inc"
+#undef TPH_SHORT_PRESPRAY
 #pragma pop_macro("TPH_DIRECT_PORT_PAD_NOPS")
 
 /* ========================================================================== */

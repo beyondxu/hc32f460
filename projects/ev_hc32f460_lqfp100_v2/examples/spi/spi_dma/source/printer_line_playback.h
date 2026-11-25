@@ -5,6 +5,14 @@ static printer_line_cache_t s_line;
 static printer_row_audit_t s_line_audit;
 static volatile uint32_t s_line_epoch,s_line_period_cycles,s_line_max_late,s_line_max_fire;
 static void HC32_LineStop(unsigned error){SysTick->CTRL=0U;SCB->ICSR=SCB_ICSR_PENDSTCLR_Msk;if(error)pl_fail(&s_line,error);else s_line.state=PL_DONE;}
+static uint32_t s_short_started,s_short_min_repeat,s_short_max_repeat;
+static int HC32_ShortPrespray(void){
+ return s_line.fire_profile==PL_FIRE_PRESPRAY&&s_line.period_us==PL_PRESPRAY_PERIOD_US;
+}
+static void HC32_AuditColumn(const uint8_t*p){
+ unsigned bits=0;for(unsigned i=0;i<PL_BYTES;i++)for(unsigned b=0;b<6;b++)bits+=(p[i]>>b)&1U;
+ printer_row_audit_column(&s_line_audit,p,bits,1U);
+}
 static void HC32_LineFire(void){
  if(s_line.state!=PL_RUNNING)return;
  uint32_t start=DWT->CYCCNT;
@@ -13,16 +21,47 @@ static void HC32_LineFire(void){
  uint32_t late=(uint32_t)(start-s_line_epoch)-expected;
  if(late>s_line_max_late)s_line_max_late=late;
  const uint8_t*p=s_line.data+(uint32_t)s_line.fired*PL_BYTES;
- if(s_line.fire_profile==PL_FIRE_PRESPRAY)TPH_FireOneColumn_Prespray(p);
- else if(s_line.fire_profile==PL_FIRE_NORMAL)TPH_FireOneColumn(p);
- else {HC32_LineStop(PL_BAD_COMMAND);return;}
- unsigned bits=0;for(unsigned i=0;i<PL_BYTES;i++)for(unsigned b=0;b<6;b++)bits+=(p[i]>>b)&1U;
- printer_row_audit_column(&s_line_audit,p,bits,1U);
+ int short_prespray=HC32_ShortPrespray();
+ if(short_prespray){
+  if(GPIO_ReadInputPins(SYNC_PORT,SYNC_PIN)==PIN_SET){HC32_LineStop(PL_CANCELED);return;}
+  const pl_short_column_t *column=&s_line.short_columns[s_line.fired];
+  if(column->count){
+   /* Allow 5 us for preparation, then start at the scheduled phase.
+    * Repeats also wait 60 us from the previous actual train start.
+    * Abort if phase slips by >3 us; a missed slot is never replayed. */
+   const uint32_t cycles_per_us=SystemCoreClock/1000000U;
+   const uint32_t phase=s_line_epoch+expected+5U*cycles_per_us;
+   uint32_t earliest=phase;
+   const uint32_t previous=s_short_started;
+   if(column->burst>1U){
+    uint32_t repeat=previous+s_line_period_cycles;
+    if((int32_t)(repeat-earliest)>0)earliest=repeat;
+   }
+   if(!TPH_FirePresprayShort(p,column->first,column->count,earliest,
+                            phase+3U*cycles_per_us,&s_short_started)){
+    HC32_LineStop(PL_TIMING);return;
+   }
+   if(column->burst>1U){
+    uint32_t interval=s_short_started-previous;
+    if(interval<s_short_min_repeat)s_short_min_repeat=interval;
+    if(interval>s_short_max_repeat)s_short_max_repeat=interval;
+   }
+  }
+ }else{
+  if(s_line.fire_profile==PL_FIRE_PRESPRAY)TPH_FireOneColumn_Prespray(p);
+  else if(s_line.fire_profile==PL_FIRE_NORMAL)TPH_FireOneColumn(p);
+  else {HC32_LineStop(PL_BAD_COMMAND);return;}
+  HC32_AuditColumn(p);
+ }
  uint32_t duration=(uint32_t)(DWT->CYCCNT-start);
  if(duration>s_line_max_fire)s_line_max_fire=duration;
  ++s_line.fired;
- if(s_line.fired==PL_COLUMNS)HC32_LineStop(PL_OK);
- else if((uint32_t)(DWT->CYCCNT-start)>=s_line_period_cycles-(SystemCoreClock/1000000U)*20U)HC32_LineStop(PL_TIMING);
+ uint32_t slot_elapsed=short_prespray?DWT->CYCCNT-(s_line_epoch+expected):
+     DWT->CYCCNT-start;
+ if((short_prespray||s_line.fired!=PL_COLUMNS)&&
+    slot_elapsed>=s_line_period_cycles-(SystemCoreClock/1000000U)*20U)
+  HC32_LineStop(PL_TIMING);
+ else if(s_line.fired==PL_COLUMNS)HC32_LineStop(PL_OK);
 }
 void SysTick_Handler(void){HC32_LineFire();}
 static int HC32_LineClockReady(void){
@@ -52,6 +91,8 @@ static int HC32_LinePacket(const uint8_t*p,uint8_t*head,printer_row_audit_t*lega
 /* Called with a100-byte cancel RX already armed. READY remains LOW during the
  * whole run and until SYNC is released, then the caller rearms status RX/TX. */
 static void HC32_RunBufferedLine(void){
+ const int short_prespray=HC32_ShortPrespray();
+ s_short_min_repeat=UINT32_MAX;s_short_max_repeat=0U;
  uint32_t began=DWT->CYCCNT;
  while(s_line.state==PL_ARMED){
   if(enDmaRxDone==SET){pl_fail(&s_line,PL_CANCELED);break;} /* cancel before start, no ink */
@@ -78,7 +119,15 @@ static void HC32_RunBufferedLine(void){
   }
  }
  SysTick->CTRL=0;SCB->ICSR=SCB_ICSR_PENDSTCLR_Msk;
- TPH_M0333N_Power(DISABLE);printer_row_audit_end(&s_line_audit);
+ TPH_M0333N_Power(DISABLE);
+ if(short_prespray)
+  printf("[HC32 PRESPRAY_TRAIN] repeat_min_cycles=%lu repeat_max_cycles=%lu core_hz=%lu\r\n",
+         (unsigned long)(s_short_max_repeat?s_short_min_repeat:0U),
+         (unsigned long)s_short_max_repeat,(unsigned long)SystemCoreClock);
+ /* Keep byte-by-byte diagnostics out of the 60 us slot. */
+ if(short_prespray)
+  for(unsigned i=0;i<s_line.fired;++i)HC32_AuditColumn(s_line.data+i*PL_BYTES);
+ printer_row_audit_end(&s_line_audit);
  printf("[HC32 LINE_DONE] token=%lu state=%u error=%u fired=%u/%u period_us=%lu crc32=%08lX max_late_cycles=%lu max_fire_cycles=%lu\r\n",(unsigned long)s_line.token,s_line.state,s_line.error,s_line.fired,PL_COLUMNS,(unsigned long)s_line.period_us,(unsigned long)s_line.expected_crc,(unsigned long)s_line_max_late,(unsigned long)s_line_max_fire);
  began=DWT->CYCCNT;
  while(GPIO_ReadInputPins(SYNC_PORT,SYNC_PIN)==PIN_RESET){if((uint32_t)(DWT->CYCCNT-began)>SystemCoreClock*5U){pl_fail(&s_line,PL_TIMEOUT);break;}}
