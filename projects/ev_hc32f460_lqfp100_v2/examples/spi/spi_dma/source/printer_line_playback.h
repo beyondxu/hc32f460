@@ -5,6 +5,9 @@ static printer_line_cache_t s_line;
 static printer_row_audit_t s_line_audit;
 static volatile uint32_t s_line_epoch,s_line_period_cycles,s_line_max_late,s_line_max_fire;
 static void HC32_LineStop(unsigned error){SysTick->CTRL=0U;SCB->ICSR=SCB_ICSR_PENDSTCLR_Msk;if(error)pl_fail(&s_line,error);else s_line.state=PL_DONE;}
+/* Keep the previous 40 us execution cutoff for the shorter period. */
+#define HC32_SHORT_SLOT_LIMIT_US 40U
+static const char *volatile s_short_timing_fault;
 static uint32_t s_short_started,s_short_min_repeat,s_short_max_repeat;
 static int HC32_ShortPrespray(void){
  return s_line.fire_profile==PL_FIRE_PRESPRAY&&s_line.period_us==PL_PRESPRAY_PERIOD_US;
@@ -17,7 +20,10 @@ static void HC32_LineFire(void){
  if(s_line.state!=PL_RUNNING)return;
  uint32_t start=DWT->CYCCNT;
  uint32_t expected=(uint32_t)s_line.fired*s_line_period_cycles;
- if((uint32_t)(start-s_line_epoch)>expected+(SystemCoreClock/1000000U)*20U){HC32_LineStop(PL_TIMING);return;}
+ if((uint32_t)(start-s_line_epoch)>expected+(SystemCoreClock/1000000U)*20U){
+  s_short_timing_fault="dispatch_late";
+  HC32_LineStop(PL_TIMING);return;
+ }
  uint32_t late=(uint32_t)(start-s_line_epoch)-expected;
  if(late>s_line_max_late)s_line_max_late=late;
  const uint8_t*p=s_line.data+(uint32_t)s_line.fired*PL_BYTES;
@@ -27,7 +33,7 @@ static void HC32_LineFire(void){
   const pl_short_column_t *column=&s_line.short_columns[s_line.fired];
   if(column->count){
    /* Allow 5 us for preparation, then start at the scheduled phase.
-    * Repeats also wait 60 us from the previous actual train start.
+    * Repeats also wait one period from the previous actual train start.
     * Abort if phase slips by >3 us; a missed slot is never replayed. */
    const uint32_t cycles_per_us=SystemCoreClock/1000000U;
    const uint32_t phase=s_line_epoch+expected+5U*cycles_per_us;
@@ -39,6 +45,7 @@ static void HC32_LineFire(void){
    }
    if(!TPH_FirePresprayShort(p,column->first,column->count,earliest,
                             phase+3U*cycles_per_us,&s_short_started)){
+    s_short_timing_fault="train_start";
     HC32_LineStop(PL_TIMING);return;
    }
    if(column->burst>1U){
@@ -58,9 +65,12 @@ static void HC32_LineFire(void){
  ++s_line.fired;
  uint32_t slot_elapsed=short_prespray?DWT->CYCCNT-(s_line_epoch+expected):
      DWT->CYCCNT-start;
- if((short_prespray||s_line.fired!=PL_COLUMNS)&&
-    slot_elapsed>=s_line_period_cycles-(SystemCoreClock/1000000U)*20U)
+ const uint32_t slot_limit=short_prespray?HC32_SHORT_SLOT_LIMIT_US*(SystemCoreClock/1000000U):
+     s_line_period_cycles-(SystemCoreClock/1000000U)*20U;
+ if((short_prespray||s_line.fired!=PL_COLUMNS)&&slot_elapsed>=slot_limit){
+  s_short_timing_fault="slot_overrun";
   HC32_LineStop(PL_TIMING);
+ }
  else if(s_line.fired==PL_COLUMNS)HC32_LineStop(PL_OK);
 }
 void SysTick_Handler(void){HC32_LineFire();}
@@ -92,6 +102,7 @@ static int HC32_LinePacket(const uint8_t*p,uint8_t*head,printer_row_audit_t*lega
  * whole run and until SYNC is released, then the caller rearms status RX/TX. */
 static void HC32_RunBufferedLine(void){
  const int short_prespray=HC32_ShortPrespray();
+ s_short_timing_fault=NULL;
  s_short_min_repeat=UINT32_MAX;s_short_max_repeat=0U;
  uint32_t began=DWT->CYCCNT;
  while(s_line.state==PL_ARMED){
@@ -124,7 +135,10 @@ static void HC32_RunBufferedLine(void){
   printf("[HC32 PRESPRAY_TRAIN] repeat_min_cycles=%lu repeat_max_cycles=%lu core_hz=%lu\r\n",
          (unsigned long)(s_short_max_repeat?s_short_min_repeat:0U),
          (unsigned long)s_short_max_repeat,(unsigned long)SystemCoreClock);
- /* Keep byte-by-byte diagnostics out of the 60 us slot. */
+ if(short_prespray&&s_short_timing_fault)
+  printf("[HC32 PRESPRAY_TIMING_STOP] stage=%s completed_slots=%u\r\n",
+         s_short_timing_fault,s_line.fired);
+ /* Keep byte-by-byte diagnostics out of the timed slot. */
  if(short_prespray)
   for(unsigned i=0;i<s_line.fired;++i)HC32_AuditColumn(s_line.data+i*PL_BYTES);
  printer_row_audit_end(&s_line_audit);

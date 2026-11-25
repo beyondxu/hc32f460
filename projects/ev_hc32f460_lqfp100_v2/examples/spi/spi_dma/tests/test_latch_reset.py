@@ -173,11 +173,11 @@ static void run_short(){
    auto edge=trace[i];
    assert(edge.a==s_u8AddrLut[first+(a<count?a:count-1U)]&&edge.s==s);
    assert(edge.d==(a<count&&s<2U?1U:0U));
-   if(shot&&edge.d)assert((uint32_t)(edge.time-previous[i].time)==12000U);
+   if(shot&&edge.d)assert((uint32_t)(edge.time-previous[i].time)==11600U);
   }
   for(unsigned i=(count+1U)*4U;i<trace.size();++i)assert(!trace[i].a&&!trace[i].d);
   previous=trace;
-  wanted=started+12000U;
+  wanted=started+11600U;
  }
  tick=wanted+100U;
  auto n=trace.size();
@@ -211,7 +211,7 @@ int main(){
  for(unsigned s=0;s<4;++s)assert(!s_state(s));
  n=trace.size();TPH_FireOneColumn(c.data());assert(trace.size()==n);
  clock_frozen=true;TPH_M0333N_Power(ENABLE);assert(!s_bHeadPowered&&!ce&&!vl&&!vp);
- puts("PASS: actual LUT/GPIO mapping, 25+1 cadence and 13+zero short train with 12000-cycle matching-S edges, continuous CE, zero stop, idle reset, power order, IRQ restore, idle gap/wrap, NULL/OFF and clock failure");
+ puts("PASS: actual LUT/GPIO mapping, 25+1 cadence and 13+zero short train with 11600-cycle matching-S edges, continuous CE, zero stop, idle reset, power order, IRQ restore, idle gap/wrap, NULL/OFF and clock failure");
 }
 '''
 h=h.replace('LUT\n',lut+'\n').replace('LOOKUP\n',lookup+'\n').replace('MACROS\n',macros+'\n').replace('SAMPLE_CHECK_HEADER\n',check_header+'\n').replace('CORE\n',core+'\n')

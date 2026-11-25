@@ -101,40 +101,42 @@ int main(int argc,char**argv){
     data[0]=data[48]=1U;
    }
   uint32_t crc=pl_crc(row,PL_ROW_BYTES);
-  pl_command(p,PL_BEGIN_PRESPRAY,1U,60U,crc);
+  pl_command(p,PL_BEGIN_PRESPRAY,1U,58U,crc);
   assert(HC32_LinePacket(p,&old_head,&legacy));
   for(unsigned col=0;col<PL_COLUMNS;++col)
    assert(HC32_LinePacket(row+col*PL_BYTES,&old_head,&legacy));
   assert(s_line.state==PL_READY&&!head&&!short_calls);
-  pl_command(p,PL_ARM,1U,60U,crc);assert(HC32_LinePacket(p,&old_head,&legacy));
+  pl_command(p,PL_ARM,1U,58U,crc);assert(HC32_LinePacket(p,&old_head,&legacy));
   assert(s_line.state==PL_ARMED&&head&&!short_calls);
   HC32_RunBufferedLine();
   assert(!head&&!SysTick->CTRL&&s_line.state==PL_DONE&&s_line.error==PL_OK);
   assert(s_line.fired==PL_COLUMNS&&s_line_audit.columns==PL_COLUMNS&&short_calls==480U);
-  assert(s_short_min_repeat==12000U&&s_short_max_repeat==12000U&&!normal_calls&&!prespray_calls);
+  assert(s_short_min_repeat==11600U&&s_short_max_repeat==11600U&&!normal_calls&&!prespray_calls);
   free(row);
   puts("PASS complete short-scan upload, ARM/SYNC, blank-slot gating, repeat timing and power OFF");
   return 0;
  }
  if(requested>=19){
   mode=requested;head=1;s_line.state=PL_RUNNING;
-  s_line.fire_profile=PL_FIRE_PRESPRAY;s_line.period_us=60U;
-  s_line_period_cycles=12000U;s_line_epoch=UINT32_MAX-30000U;
+  s_line.fire_profile=PL_FIRE_PRESPRAY;s_line.period_us=58U;
+  s_line_period_cycles=11600U;s_line_epoch=UINT32_MAX-30000U;
   for(unsigned j=0;j<8U;++j){
    uint8_t *p=s_line.data+j*PL_BYTES;
    p[0]=p[48]=1;s_line.received=j;assert(pl_short_column(&s_line,p));
   }
   for(unsigned j=0;j<8U&&s_line.state==PL_RUNNING;++j){
    short_cancel=j==1U&&mode==21;
-   DWT->CYCCNT=s_line_epoch+j*12000U;
+   DWT->CYCCNT=s_line_epoch+j*11600U;
    SysTick_Handler();
   }
   if(mode==19){
    assert(short_calls==8U&&s_line.fired==8U);
-   for(unsigned j=1;j<8U;++j)assert((uint32_t)(train_starts[j]-train_starts[j-1])==12000U);
+   for(unsigned j=1;j<8U;++j)assert((uint32_t)(train_starts[j]-train_starts[j-1])==11600U);
   }else{
    assert(short_calls==1U&&s_line.state==PL_ERROR);
    assert(s_line.error==(mode==21?PL_CANCELED:PL_TIMING));
+   if(mode==20)assert(!strcmp(s_short_timing_fault,"train_start"));
+   if(mode==22)assert(!strcmp(s_short_timing_fault,"slot_overrun"));
   }
   return 0;
  }

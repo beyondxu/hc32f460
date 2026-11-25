@@ -1,4 +1,14 @@
-# 60 µs stationary prespray trial
+# Stationary prespray trial
+
+V55 raises the prespray rate to 58 µs (about 17.24 kHz). The 40 µs slot
+execution cutoff leaves 18 µs before the next slot. At 200 MHz the repeat
+start gate uses 11,600 cycles. The BK banner includes
+`V55_requires_HC_prespray_58us_pad32`, and both MCUs report 58 µs. If a row
+stops, check BK `WASTE_FIRE_STOP` and HC `PRESPRAY_TIMING_STOP` for the
+failed stage. A completed row records drive requests. Ink delivery requires
+observation at the pad.
+
+## V54 60 µs baseline
 
 Build and flash HC32 first, then BK7258. Both sides must advertise/accept the
 60 µs prespray period and 32-NOP profile. The ordinary 673 µs image line uses
